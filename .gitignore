@@ -1,0 +1,16 @@
+# Vendor bundles are re-downloaded by tools/build-html.ps1 on demand
+tools/vendor/
+vendor/
+
+# Local env / deploy metadata
+.env
+.env.local
+.vercel/
+
+# Backups exported from the console
+das-superfoods-backup-*.json
+
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
