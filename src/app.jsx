@@ -90,12 +90,6 @@ function PageHead({ title, blurb }) {
 
 /* -------------------------------------------------------------- helpers */
 const CURRENCY_SYMBOL = { USD: "$", INR: "₹" };
-const SERIES_PREFIX = {
-  quotation: "DS-QUO",
-  pi_international: "DS-PI-INTL",
-  pi_domestic: "DS-PI-DOM",
-  final: "DS-INV",
-};
 
 const ONES = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
   "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
@@ -138,142 +132,234 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 const nowISO = () => new Date().toISOString();
 const fmtWhen = (iso) => { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } };
 
-/* --------------------------------------------------------------- sha256 */
-function sha256Bytes(ascii) {
-  function rightRotate(value, amount) { return (value >>> amount) | (value << (32 - amount)); }
-  const mathPow = Math.pow, maxWord = mathPow(2, 32);
-  let i, j, result = "";
-  const words = [];
-  const asciiBitLength = ascii.length * 8;
 
-  let hash = sha256Bytes.h = sha256Bytes.h || [];
-  const k = sha256Bytes.k = sha256Bytes.k || [];
-  let primeCounter = k.length;
+/* ------------------------------------------------------ supabase client */
+const SUPABASE_URL = "https://jvpziatizbaghxhyslrg.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2cHppYXRpemJhZ2h4aHlzbHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1OTMxMDQsImV4cCI6MjEwNDE2OTEwNH0.v0eTuaSb040cPFDyGLMU4v8epUSj0OUDV7KtADuxcTY";
+const THEME_KEY = "das-superfoods-erp/theme";
 
-  const isComposite = {};
-  for (let candidate = 2; primeCounter < 64; candidate++) {
-    if (!isComposite[candidate]) {
-      for (i = 0; i < 313; i += candidate) isComposite[i] = candidate;
-      hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
-      k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
-    }
+// The anon key is meant to be public: every request it makes is still filtered
+// by the row-level security policies in the database.
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true },
+});
+
+/* ------------------------------------------------ row to object mapping */
+/* The database speaks snake_case; the screens speak camelCase. Keeping the
+   translation here means no component has to know about the database.    */
+const num = (v) => Number(v) || 0;
+
+const partyFromRow = (r, products) => ({
+  id: r.id, type: r.type,
+  buyerName: r.buyer_name, buyerAddress: r.buyer_address,
+  consigneeName: r.consignee_name, consigneeAddress: r.consignee_address,
+  consigneeOptions: r.consignee_options || [],
+  country: r.country, currency: r.currency,
+  shipmentTerm: r.shipment_term, paymentTerm: r.payment_term, conditions: r.conditions,
+  portOfLoading: r.port_of_loading, destinationPort: r.destination_port,
+  products: (products || []).map((p) => ({
+    id: p.id, name: p.name, hsn: p.hsn,
+    rate: num(p.rate), mrp: num(p.mrp),
+    netWt: num(p.net_wt), grossWt: num(p.gross_wt),
+    packsPerBox: num(p.packs_per_box), weightPerPackG: num(p.weight_per_pack_g),
+  })),
+});
+
+const partyToRow = (p) => ({
+  type: p.type,
+  buyer_name: p.buyerName, buyer_address: p.buyerAddress,
+  consignee_name: p.consigneeName, consignee_address: p.consigneeAddress,
+  consignee_options: p.consigneeOptions || [],
+  country: p.country, currency: p.currency,
+  shipment_term: p.shipmentTerm, payment_term: p.paymentTerm, conditions: p.conditions,
+  port_of_loading: p.portOfLoading, destination_port: p.destinationPort,
+});
+
+const productToRow = (partyId, p) => ({
+  party_id: partyId, name: p.name, hsn: p.hsn,
+  rate: num(p.rate), mrp: num(p.mrp),
+  net_wt: num(p.netWt), gross_wt: num(p.grossWt),
+  packs_per_box: num(p.packsPerBox), weight_per_pack_g: num(p.weightPerPackG),
+});
+
+const quotationFromRow = (r) => ({
+  id: r.id, docNo: r.doc_no, date: r.doc_date, partyId: r.party_id,
+  buyerName: r.buyer_name, buyerAddress: r.buyer_address, country: r.country,
+  shipmentTerm: r.shipment_term, paymentTerm: r.payment_term,
+  igst: r.igst, igstRate: num(r.igst_rate),
+  totalValue: num(r.total_value), igstAmt: num(r.igst_amount), grandTotal: num(r.grand_total),
+  items: r.items || [],
+});
+
+const quotationToRow = (q) => ({
+  doc_no: q.docNo, doc_date: q.date, party_id: q.partyId || null,
+  buyer_name: q.buyerName, buyer_address: q.buyerAddress || "", country: q.country,
+  shipment_term: q.shipmentTerm, payment_term: q.paymentTerm || "",
+  igst: Boolean(q.igst), igst_rate: num(q.igstRate),
+  total_value: num(q.totalValue), igst_amount: num(q.igstAmt), grand_total: num(q.grandTotal),
+  items: q.items || [],
+});
+
+const proformaFromRow = (r) => ({
+  id: r.id, docNo: r.doc_no, date: r.doc_date, type: r.type, partyId: r.party_id,
+  quotationRef: r.quotation_ref,
+  buyerName: r.buyer_name, buyerAddress: r.buyer_address,
+  consigneeName: r.consignee_name, consigneeAddress: r.consignee_address,
+  consigneeOptions: r.consignee_options || [],
+  portOfLoading: r.port_of_loading, destinationPort: r.destination_port,
+  shipmentTerm: r.shipment_term, paymentTerm: r.payment_term, conditions: r.conditions,
+  currency: r.currency, buyerOrderNo: r.order_no, buyerOrderDate: r.order_date,
+  additionalDetails: r.additional_details,
+  totalBoxes: r.total_boxes, totalValue: num(r.total_value), taxableValue: num(r.taxable_value),
+  taxRate: num(r.tax_rate), taxAmount: num(r.tax_amount), grandTotal: num(r.grand_total),
+  items: r.items || [],
+  linkedFinalInvoiceId: r.shipment_id,
+});
+
+const proformaToRow = (p) => ({
+  doc_no: p.docNo, doc_date: p.date, type: p.type, party_id: p.partyId || null,
+  quotation_ref: p.quotationRef || "",
+  buyer_name: p.buyerName, buyer_address: p.buyerAddress,
+  consignee_name: p.consigneeName, consignee_address: p.consigneeAddress,
+  consignee_options: p.consigneeOptions || [],
+  port_of_loading: p.portOfLoading, destination_port: p.destinationPort,
+  shipment_term: p.shipmentTerm, payment_term: p.paymentTerm, conditions: p.conditions,
+  currency: p.currency, order_no: p.buyerOrderNo || "", order_date: p.buyerOrderDate || null,
+  additional_details: p.additionalDetails || "",
+  total_boxes: p.totalBoxes || 0, total_value: num(p.totalValue), taxable_value: num(p.taxableValue),
+  tax_rate: num(p.taxRate), tax_amount: num(p.taxAmount), grand_total: num(p.grandTotal),
+  items: p.items || [],
+});
+
+const shipmentFromRow = (r) => ({
+  id: r.id, docNo: r.doc_no, taxDocNo: r.tax_doc_no, commercialDocNo: r.commercial_doc_no,
+  date: r.doc_date, piId: r.proforma_id, piNo: r.proforma_no, piDate: r.proforma_date,
+  buyerName: r.buyer_name, buyerAddress: r.buyer_address,
+  orderNo: r.order_no, orderDate: r.order_date,
+  exchangeRate: r.exchange_rate, containerNo: r.container_no, vehicleNo: r.vehicle_no,
+  customSeal: r.customs_seal, lineSeal: r.line_seal,
+  portOfLoading: r.port_of_loading, incoterm: r.incoterm,
+  gstPercent: r.gst_percent, roundOff: r.round_off, freight: r.freight,
+  otherAdj: r.other_adjustment, otherReason: r.other_reason,
+  taxInvoice: r.tax_invoice || {}, commercialInvoice: r.commercial_invoice || {},
+  packingList: r.packing_list || {}, company: r.company_snapshot || {},
+  items: r.items || [],
+});
+
+const shipmentToRow = (s) => ({
+  doc_no: s.docNo, tax_doc_no: s.taxDocNo, commercial_doc_no: s.commercialDocNo,
+  doc_date: s.date, proforma_id: s.piId, proforma_no: s.piNo, proforma_date: s.piDate,
+  buyer_name: s.buyerName, buyer_address: s.buyerAddress || "",
+  order_no: s.orderNo || "", order_date: s.orderDate || null,
+  exchange_rate: num(s.exchangeRate) || 1, container_no: s.containerNo, vehicle_no: s.vehicleNo,
+  customs_seal: s.customSeal, line_seal: s.lineSeal,
+  port_of_loading: s.portOfLoading, incoterm: s.incoterm,
+  gst_percent: num(s.gstPercent), round_off: num(s.roundOff), freight: num(s.freight),
+  other_adjustment: num(s.otherAdj), other_reason: s.otherReason || "",
+  tax_invoice: s.taxInvoice || {}, commercial_invoice: s.commercialInvoice || {},
+  packing_list: s.packingList || {}, company_snapshot: s.company || {},
+  items: s.items || [],
+});
+
+const companyFromRow = (r) => ({
+  name: r.name, address: r.address, bankName: r.bank_name, accountNo: r.account_no,
+  ifsc: r.ifsc, swift: r.swift, gstNo: r.gst_no, iecCode: r.iec_code,
+});
+
+const companyToRow = (c) => ({
+  name: c.name, address: c.address, bank_name: c.bankName, account_no: c.accountNo,
+  ifsc: c.ifsc, swift: c.swift, gst_no: c.gstNo, iec_code: c.iecCode,
+  updated_at: new Date().toISOString(),
+});
+
+const userFromRow = (r) => ({
+  id: r.id, name: r.full_name || r.email, email: r.email, role: r.role,
+  access: { documents: r.access_documents, parties: r.access_parties, company: r.access_company },
+  active: r.active, createdAt: r.created_at, lastLogin: r.last_login,
+});
+
+const auditFromRow = (r) => ({ id: r.id, at: r.at, user: r.actor, action: r.action, detail: r.detail });
+
+/* ----------------------------------------------------------- data access */
+const EMPTY_STORE = {
+  users: [],
+  company: { name: "", address: "", bankName: "", accountNo: "", ifsc: "", swift: "", gstNo: "", iecCode: "" },
+  parties: [], quotations: [], pis: [], finalInvoices: [], audit: [],
+};
+
+// One pass that rebuilds everything the screens expect. Anything this user is
+// not allowed to see comes back empty because the database filters it — the
+// interface is not what is keeping them out.
+async function fetchStore(profile) {
+  const out = JSON.parse(JSON.stringify(EMPTY_STORE));
+  const isAdmin = profile.role === "admin";
+  const canParties = isAdmin || profile.access.parties;
+  const canDocs = isAdmin || profile.access.documents;
+  const canCompany = isAdmin || profile.access.company;
+  const jobs = [];
+
+  if (canParties) {
+    jobs.push((async () => {
+      const [parties, products] = await Promise.all([
+        sb.from("parties").select("*").order("created_at", { ascending: true }),
+        sb.from("party_products").select("*"),
+      ]);
+      const byParty = {};
+      (products.data || []).forEach((p) => { (byParty[p.party_id] = byParty[p.party_id] || []).push(p); });
+      out.parties = (parties.data || []).map((r) => partyFromRow(r, byParty[r.id]));
+    })());
   }
 
-  ascii += "\x80";
-  while (ascii.length % 64 - 56) ascii += "\x00";
-  for (i = 0; i < ascii.length; i++) {
-    j = ascii.charCodeAt(i);
-    if (j >> 8) return null;
-    words[i >> 2] |= j << ((3 - i) % 4) * 8;
-  }
-  words[words.length] = (asciiBitLength / maxWord) | 0;
-  words[words.length] = asciiBitLength;
-
-  for (j = 0; j < words.length;) {
-    const w = words.slice(j, j += 16);
-    const oldHash = hash;
-    hash = hash.slice(0, 8);
-
-    for (i = 0; i < 64; i++) {
-      const w15 = w[i - 15], w2 = w[i - 2];
-      const a = hash[0], e = hash[4];
-      const temp1 = hash[7]
-        + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
-        + ((e & hash[5]) ^ ((~e) & hash[6]))
-        + k[i]
-        + (w[i] = (i < 16) ? w[i] : (
-          w[i - 16]
-          + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
-          + w[i - 7]
-          + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))
-        ) | 0);
-      const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
-        + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
-      hash = [(temp1 + temp2) | 0].concat(hash);
-      hash[4] = (hash[4] + temp1) | 0;
-    }
-    for (i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+  if (canDocs) {
+    jobs.push((async () => {
+      const { data } = await sb.from("quotations").select("*").order("created_at", { ascending: false });
+      out.quotations = (data || []).map(quotationFromRow);
+    })());
+    jobs.push((async () => {
+      const { data } = await sb.from("proformas").select("*").order("created_at", { ascending: false });
+      out.pis = (data || []).map(proformaFromRow);
+    })());
+    jobs.push((async () => {
+      const { data } = await sb.from("shipments").select("*").order("created_at", { ascending: false });
+      out.finalInvoices = (data || []).map(shipmentFromRow);
+    })());
   }
 
-  for (i = 0; i < 8; i++) {
-    for (j = 3; j + 1; j--) {
-      const b = (hash[i] >> (j * 8)) & 255;
-      result += ((b < 16) ? 0 : "") + b.toString(16);
-    }
+  if (canCompany) {
+    jobs.push((async () => {
+      const { data } = await sb.from("company_profile").select("*").eq("id", 1).maybeSingle();
+      if (data) out.company = companyFromRow(data);
+    })());
   }
-  return result;
-}
 
-function toByteString(str) {
-  const bytes = new TextEncoder().encode(str);
-  let out = "";
-  for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
+  jobs.push((async () => {
+    const q = isAdmin
+      ? sb.from("profiles").select("*").order("created_at", { ascending: true })
+      : sb.from("profiles").select("*").eq("id", profile.id);
+    const { data } = await q;
+    out.users = (data || []).map(userFromRow);
+  })());
+
+  if (isAdmin) {
+    jobs.push((async () => {
+      const { data } = await sb.from("audit_log").select("*").order("at", { ascending: false }).limit(200);
+      out.audit = (data || []).map(auditFromRow);
+    })());
+  }
+
+  await Promise.all(jobs);
   return out;
 }
 
-const sha256 = (str) => sha256Bytes(toByteString(str));
-const hashPassword = (password, salt) => sha256(salt + ":" + password);
-const makeSalt = () => uid() + uid();
-const tempPassword = () => "Das" + Math.floor(1000 + Math.random() * 9000) + uid().slice(0, 4);
-
-/* -------------------------------------------------------------- storage */
-const STORE_KEY = "das-superfoods-erp/v2";
-const LEGACY_KEY = "das-superfoods-erp/v1";
-const SESSION_KEY = "das-superfoods-erp/session";
-const THEME_KEY = "das-superfoods-erp/theme";
-const storageState = { ok: true };
-
-const ADMIN_EMAIL = "admin@dassuperfoods.in";
-const DEFAULT_ADMIN_PASSWORD = "admin123";
-
-function readRaw(key) {
-  try { return window.localStorage.getItem(key); } catch (e) { storageState.ok = false; return null; }
+async function writeAudit(actor, action, detail) {
+  // The log must never block the work it is recording.
+  try { await sb.from("audit_log").insert({ actor, action, detail: detail || "" }); } catch (e) { /* ignore */ }
 }
 
-function loadStore() {
-  const raw = readRaw(STORE_KEY);
-  if (raw) { try { return JSON.parse(raw); } catch (e) { return null; } }
-  // Carry over a store written by the previous (sidebar) build.
-  const legacy = readRaw(LEGACY_KEY);
-  if (legacy) { try { return migrateV1(JSON.parse(legacy)); } catch (e) { return null; } }
-  return null;
-}
-
-function migrateV1(old) {
-  const roleById = {};
-  (old.roles || []).forEach((r) => { roleById[r.id] = r; });
-  return {
-    version: 2,
-    users: (old.users || []).map((u) => {
-      const r = roleById[u.roleId] || {};
-      const p = r.permissions || {};
-      return {
-        id: u.id, name: u.name, email: u.email || `${u.username}@dassuperfoods.in`,
-        role: r.isAdmin ? "admin" : "staff",
-        access: {
-          documents: Boolean(p.quotations || p.pis || p.invoices),
-          parties: Boolean(p.parties),
-          company: Boolean(p.company),
-        },
-        salt: u.salt, hash: u.hash, active: u.active,
-        mustChangePassword: u.mustChangePassword, usingDefaultPassword: u.usingDefaultPassword,
-        createdAt: u.createdAt, lastLogin: u.lastLogin,
-      };
-    }),
-    company: old.company, parties: old.parties, quotations: old.quotations,
-    pis: old.pis, finalInvoices: old.finalInvoices, counters: old.counters, audit: old.audit || [],
-  };
-}
-
-function saveStore(data) {
-  try { window.localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
-  catch (e) { storageState.ok = false; }
-}
-
-function readSession() { try { return window.sessionStorage.getItem(SESSION_KEY); } catch (e) { return null; } }
-function writeSession(id) {
-  try { if (id) window.sessionStorage.setItem(SESSION_KEY, id); else window.sessionStorage.removeItem(SESSION_KEY); }
-  catch (e) { /* session simply won't survive a refresh */ }
+async function nextDocNo(seriesKey) {
+  const { data, error } = await sb.rpc("next_doc_no", { series_key: seriesKey });
+  if (error) throw new Error("Could not allocate a document number: " + error.message);
+  return data;
 }
 
 /* --------------------------------------------------------------- access */
@@ -294,64 +380,6 @@ const NAV = [
   { key: "company", label: "Company", needs: "company" },
   { key: "users", label: "Users", adminOnly: true },
 ];
-
-function seedStore() {
-  const salt = makeSalt();
-  return {
-    version: 2,
-    users: [{
-      id: "user-admin", name: "Administrator", email: ADMIN_EMAIL,
-      role: "admin", access: { documents: true, parties: true, company: true },
-      salt, hash: hashPassword(DEFAULT_ADMIN_PASSWORD, salt),
-      active: true, mustChangePassword: true, usingDefaultPassword: true,
-      createdAt: nowISO(), lastLogin: null,
-    }],
-    company: {
-      name: "Das Superfoods Pvt. Ltd.",
-      address: "Plot 24, GIDC Industrial Estate, Ahmedabad, Gujarat, India",
-      bankName: "HDFC Bank, Ahmedabad Branch",
-      accountNo: "50200012345678",
-      ifsc: "HDFC0000123",
-      swift: "HDFCINBB",
-      gstNo: "24AAAAA0000A1Z5",
-      iecCode: "0312345678",
-    },
-    parties: [
-      {
-        id: "party-1", type: "international",
-        buyerName: "Al Rawabi General Trading LLC",
-        buyerAddress: "Al Quoz Industrial Area 3, Dubai, UAE",
-        consigneeName: "Al Rawabi General Trading LLC",
-        consigneeAddress: "Jebel Ali Free Zone, Dubai, UAE",
-        country: "United Arab Emirates", currency: "USD", shipmentTerm: "CIF",
-        paymentTerm: "30% advance, 70% against BL copy",
-        conditions: "Shelf life min. 9 months on arrival.",
-        portOfLoading: "Mundra, India", destinationPort: "Jebel Ali, UAE",
-        consigneeOptions: ["Al Rawabi General Trading LLC", "Al Rawabi FZE (Jebel Ali)"],
-        products: [
-          { id: uid(), name: "Peanut Butter Creamy 340g", hsn: "20081100", rate: 1.85, mrp: 0, netWt: 0.35, grossWt: 0.41, packsPerBox: 12, weightPerPackG: 340 },
-          { id: uid(), name: "Peanut Butter Crunchy 510g", hsn: "20081100", rate: 2.4, mrp: 0, netWt: 0.53, grossWt: 0.6, packsPerBox: 12, weightPerPackG: 510 },
-        ],
-      },
-      {
-        id: "party-2", type: "domestic",
-        buyerName: "Vitality Retail Pvt Ltd",
-        buyerAddress: "MIDC, Andheri East, Mumbai, Maharashtra",
-        consigneeName: "Vitality Retail Pvt Ltd — Bhiwandi Warehouse",
-        consigneeAddress: "Bhiwandi, Thane, Maharashtra",
-        country: "India", currency: "INR", shipmentTerm: "Ex-Factory",
-        paymentTerm: "50% advance, 50% on delivery",
-        conditions: "Private label — Vitality brand artwork.",
-        portOfLoading: "-", destinationPort: "-",
-        consigneeOptions: ["Vitality Retail Pvt Ltd — Bhiwandi Warehouse"],
-        products: [
-          { id: uid(), name: "Rolled Oats 1kg (Private Label)", hsn: "11042300", rate: 0, mrp: 210, netWt: 1, grossWt: 1.08, packsPerBox: 10, weightPerPackG: 1000 },
-        ],
-      },
-    ],
-    quotations: [], pis: [], finalInvoices: [], counters: {}, audit: [],
-  };
-}
 
 /* ------------------------------------------------------------- app ctx */
 const AppCtx = createContext(null);
@@ -389,33 +417,42 @@ function diffParty(before, after) {
 }
 
 /* --------------------------------------------------------------- login */
-function SignIn({ store, onLogin }) {
+function SignIn({ onSignIn, onSignUp, onReset, notice }) {
+  const [mode, setMode] = useState("in");           // in | up | forgot
+  const [fullName, setFullName] = useState("");
   const [emailValue, setEmailValue] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const firstRun = store.users.some((u) => u.usingDefaultPassword);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState("");
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    const res = onLogin(emailValue.trim(), password);
-    if (res !== true) setError(res);
+    setError(""); setSent(""); setBusy(true);
+    try {
+      if (mode === "in") {
+        const msg = await onSignIn(emailValue.trim(), password);
+        if (msg) setError(msg);
+      } else if (mode === "up") {
+        const msg = await onSignUp(emailValue.trim(), password, fullName.trim());
+        if (msg && msg.error) setError(msg.error);
+        else if (msg && msg.info) setSent(msg.info);
+      } else {
+        const msg = await onReset(emailValue.trim());
+        setSent(msg || "If that address has an account, a reset link is on its way.");
+      }
+    } catch (err) {
+      setError(err && err.message ? err.message : String(err));
+    }
+    setBusy(false);
   };
 
-  // Nobody can reset a forgotten password for you here — there is no server and
-  // no email behind these accounts — so the only way back in is a clean slate.
-  const hardReset = () => {
-    const ok = window.confirm(
-      "Reset this console?\n\nEvery user account, party and document stored in THIS browser will be erased, "
-      + "and sign-in returns to the default admin account.\n\nThis cannot be undone."
-    );
-    if (!ok) return;
-    try {
-      window.localStorage.removeItem(STORE_KEY);
-      window.localStorage.removeItem(LEGACY_KEY);
-      window.sessionStorage.clear();
-    } catch (e) { /* nothing stored to begin with */ }
-    window.location.reload();
-  };
+  const tab = (key, label) => (
+    <button type="button" onClick={() => { setMode(key); setError(""); setSent(""); }}
+      className={`pb-2 text-sm ${mode === key ? "border-b-2 border-[var(--accent)] text-[var(--text)]" : "text-[var(--muted)]"}`}>
+      {label}
+    </button>
+  );
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] p-6">
@@ -424,78 +461,69 @@ function SignIn({ store, onLogin }) {
           <p className="font-serif text-2xl tracking-tight text-[var(--text)]">Das Superfoods</p>
           <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">Export console</p>
         </div>
+
         <form onSubmit={submit} className={card + " p-6"}>
-          <p className="mb-5 text-sm font-medium text-[var(--text)]">Sign in</p>
-          <Field label="Email" className="mb-4">
-            <input className={input} value={emailValue} autoFocus autoComplete="username"
+          <div className="mb-5 flex gap-5 border-b border-[var(--line)]">
+            {tab("in", "Sign in")}
+            {tab("up", "Create account")}
+          </div>
+
+          {mode === "up" && (
+            <Field label="Full name" className="mb-4">
+              <input className={input} value={fullName} onChange={(e) => setFullName(e.target.value)} />
+            </Field>
+          )}
+
+          <Field label="Work email" className="mb-4">
+            <input type="email" className={input} value={emailValue} autoComplete="username"
               onChange={(e) => { setEmailValue(e.target.value); setError(""); }} />
           </Field>
-          <Field label="Password" className="mb-5">
-            <input type="password" className={input} value={password} autoComplete="current-password"
-              onChange={(e) => { setPassword(e.target.value); setError(""); }} />
-          </Field>
-          {error && <p className={errText + " mb-4"}>{error}</p>}
-          <button type="submit" className={btn + " w-full"}>Sign in</button>
-          {firstRun ? (
-            <div className="mt-5 rounded-lg border border-[var(--line)] bg-[var(--field)] p-3 text-xs leading-relaxed text-[var(--muted)]">
-              First run — sign in with <span className="text-[var(--text)]">{ADMIN_EMAIL}</span> (or just{" "}
-              <span className="text-[var(--text)]">admin</span>) and password{" "}
-              <span className="text-[var(--text)]">{DEFAULT_ADMIN_PASSWORD}</span>. You'll set your own password next.
-            </div>
-          ) : (
-            <p className="mt-5 text-center text-xs text-[var(--muted)]">
-              This browser already holds a console with{" "}
-              {store.users.length === 1 ? "one account" : `${store.users.length} accounts`}, so the default password no longer applies.{" "}
-              <button type="button" onClick={hardReset} className="text-[var(--accent)] underline underline-offset-2">
-                Locked out? Reset this console
-              </button>
-            </p>
+
+          {mode !== "forgot" && (
+            <Field label="Password" className="mb-5" hint={mode === "up" ? "At least 8 characters" : null}>
+              <input type="password" className={input} value={password}
+                autoComplete={mode === "up" ? "new-password" : "current-password"}
+                onChange={(e) => { setPassword(e.target.value); setError(""); }} />
+            </Field>
           )}
+
+          {error && <p className={errText + " mb-4"}>{error}</p>}
+          {sent && <p className="mb-4 text-sm text-emerald-400">{sent}</p>}
+          {notice && !error && !sent && <p className="mb-4 text-xs text-[var(--muted)]">{notice}</p>}
+
+          <button type="submit" disabled={busy} className={btn + " w-full"}>
+            {busy ? "Working…" : mode === "in" ? "Sign in" : mode === "up" ? "Create account" : "Send reset link"}
+          </button>
+
+          <button type="button" onClick={() => { setMode(mode === "forgot" ? "in" : "forgot"); setError(""); setSent(""); }}
+            className="mt-3 w-full text-xs text-[var(--muted)] hover:text-[var(--text)]">
+            {mode === "forgot" ? "Back to sign in" : "Forgotten your password?"}
+          </button>
         </form>
+
         <p className="mt-5 text-center text-[11px] leading-relaxed text-[var(--faint)]">
-          Accounts and data live in this browser only. Anyone who can open this file and browser profile can read them —
-          this is an internal tool, not hardened security.
+          New accounts start with no access to any section. An administrator grants them under Users &amp; access.
         </p>
       </div>
     </div>
   );
 }
 
-function SetPassword({ user, onChange, onCancel }) {
-  const [pw1, setPw1] = useState("");
-  const [pw2, setPw2] = useState("");
-  const [error, setError] = useState("");
-
-  const submit = (e) => {
-    e.preventDefault();
-    if (pw1.length < 8) return setError("Use at least 8 characters.");
-    if (pw1 !== pw2) return setError("The two passwords don't match.");
-    if (pw1 === DEFAULT_ADMIN_PASSWORD) return setError("Pick something other than the default password.");
-    onChange(pw1);
-  };
-
+function NoAccess({ profile, onSignOut }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] p-6">
-      <form onSubmit={submit} className={card + " w-full max-w-sm p-6"}>
-        <p className="font-serif text-xl text-[var(--text)]">Set your password</p>
-        <p className="mb-5 mt-1 text-xs text-[var(--muted)]">
-          {user.name} ({user.email}) — this account is still on a password that was issued to it.
+      <div className={card + " w-full max-w-md p-6 text-center"}>
+        <Lock className="mx-auto mb-3 h-6 w-6 text-[var(--muted)]" />
+        <p className="font-serif text-xl">Waiting for access</p>
+        <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">
+          Your account <span className="text-[var(--text)]">{profile.email}</span> is created, but no sections have been
+          granted to it yet. An administrator needs to tick your permissions under Users &amp; access.
         </p>
-        <Field label="New password" className="mb-4">
-          <input type="password" className={input} value={pw1} autoFocus onChange={(e) => { setPw1(e.target.value); setError(""); }} />
-        </Field>
-        <Field label="Confirm password" className="mb-5">
-          <input type="password" className={input} value={pw2} onChange={(e) => { setPw2(e.target.value); setError(""); }} />
-        </Field>
-        {error && <p className={errText + " mb-4"}>{error}</p>}
-        <button type="submit" className={btn + " w-full"}>Save password</button>
-        <button type="button" onClick={onCancel} className="mt-3 w-full text-xs text-[var(--muted)] hover:text-[var(--text)]">Sign out instead</button>
-      </form>
+        <button onClick={onSignOut} className={btnGhost + " mt-5"}>Sign out</button>
+      </div>
     </div>
   );
 }
-
-/* ------------------------------------------------------- command palette */
 function CommandPalette({ open, onClose, onNavigate, sections }) {
   const { store } = useApp();
   const [q, setQ] = useState("");
@@ -549,78 +577,129 @@ function CommandPalette({ open, onClose, onNavigate, sections }) {
 
 /* ------------------------------------------------------------------ app */
 function App() {
-  const [store, setStore] = useState(() => loadStore() || seedStore());
-  const [sessionUserId, setSessionUserId] = useState(() => readSession());
+  const [session, setSession] = useState(undefined);   // undefined = still checking
+  const [profile, setProfile] = useState(null);
+  const [store, setStore] = useState(EMPTY_STORE);
+  const [loading, setLoading] = useState(false);
   const [active, setActive] = useState("overview");
   const [theme, setTheme] = useState(() => { try { return window.localStorage.getItem(THEME_KEY) || "dark"; } catch (e) { return "dark"; } });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [notice, setNotice] = useState("");
 
-  useEffect(() => { saveStore(store); }, [store]);
+  /* --- theme ------------------------------------------------------- */
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
     try { window.localStorage.setItem(THEME_KEY, theme); } catch (e) { /* not fatal */ }
   }, [theme]);
 
+  /* --- auth session ------------------------------------------------ */
   useEffect(() => {
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    sb.auth.getSession().then(({ data }) => setSession(data.session || null));
+    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
   }, []);
 
-  const user = store.users.find((u) => u.id === sessionUserId && u.active) || null;
+  /* --- profile for the signed-in user ------------------------------ */
+  useEffect(() => {
+    if (!session) { setProfile(null); setStore(EMPTY_STORE); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await sb.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+      if (cancelled) return;
+      setProfile(data ? userFromRow(data) : null);
+    })();
+    return () => { cancelled = true; };
+  }, [session]);
 
-  const pushAudit = (username, action, detail) =>
-    setStore((s) => ({ ...s, audit: [{ id: uid(), at: nowISO(), user: username, action, detail: detail || "" }, ...s.audit].slice(0, 500) }));
+  /* --- the data itself, plus live updates -------------------------- */
+  const refresh = React.useCallback(async () => {
+    if (!profile) return;
+    setLoading(true);
+    try { setStore(await fetchStore(profile)); }
+    catch (e) { setNotice("Could not load data: " + (e.message || e)); }
+    setLoading(false);
+  }, [profile]);
 
-  const audit = (action, detail) => pushAudit(user ? user.email : "—", action, detail);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (!profile) return;
+    // Anything anyone changes lands here, so two people working at once stay
+    // in step without reloading. RLS still applies to what each client gets.
+    const channel = sb.channel("console-changes");
+    ["parties", "party_products", "quotations", "proformas", "shipments", "company_profile", "profiles", "audit_log"]
+      .forEach((table) => channel.on("postgres_changes", { event: "*", schema: "public", table }, () => refresh()));
+    channel.subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [profile, refresh]);
+
+  /* --- auth actions ------------------------------------------------ */
+  const signIn = async (email, password) => {
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      writeAudit(email, "Sign-in failed", error.message);
+      return error.message === "Invalid login credentials"
+        ? "That email and password do not match an account."
+        : error.message;
+    }
+    writeAudit(email, "Signed in", "");
+    await sb.from("profiles").update({ last_login: new Date().toISOString() }).eq("email", email);
+    setActive("overview");
+    return "";
+  };
+
+  const signUp = async (email, password, fullName) => {
+    if (password.length < 8) return { error: "Use at least 8 characters." };
+    const { data, error } = await sb.auth.signUp({
+      email, password, options: { data: { full_name: fullName || email } },
+    });
+    if (error) return { error: error.message };
+    if (data.session) { writeAudit(email, "Account created", fullName); return {}; }
+    return { info: "Account created. Check your email for the confirmation link, then sign in." };
+  };
+
+  const resetPassword = async (email) => {
+    await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    return "If that address has an account, a reset link is on its way.";
+  };
+
+  const signOut = async () => {
+    if (profile) writeAudit(profile.email, "Signed out", "");
+    await sb.auth.signOut();
+  };
+
+  const audit = (action, detail) => {
+    writeAudit(profile ? profile.email : "—", action, detail);
+  };
 
   const can = (needs) => {
-    if (!user) return false;
-    if (user.role === "admin") return true;
+    if (!profile) return false;
+    if (profile.role === "admin") return true;
     if (!needs) return true;
-    return Boolean((user.access || {})[needs]);
+    return Boolean((profile.access || {})[needs]);
   };
 
-  const login = (idValue, password) => {
-    const key = idValue.toLowerCase();
-    const candidate = store.users.find((u) =>
-      u.email.toLowerCase() === key || u.email.toLowerCase().split("@")[0] === key);
-    if (!candidate) { pushAudit(idValue, "Sign-in failed", "No such account"); return "Unknown email or password."; }
-    if (!candidate.active) { pushAudit(idValue, "Sign-in blocked", "Account deactivated"); return "This account has been deactivated."; }
-    if (hashPassword(password, candidate.salt) !== candidate.hash) {
-      pushAudit(idValue, "Sign-in failed", "Wrong password");
-      return "Unknown email or password.";
-    }
-    setStore((s) => ({
-      ...s,
-      users: s.users.map((u) => (u.id === candidate.id ? { ...u, lastLogin: nowISO() } : u)),
-      audit: [{ id: uid(), at: nowISO(), user: candidate.email, action: "Signed in", detail: "" }, ...s.audit].slice(0, 500),
-    }));
-    setSessionUserId(candidate.id);
-    writeSession(candidate.id);
-    setActive("overview");
-    return true;
-  };
+  /* --- gates ------------------------------------------------------- */
+  if (session === undefined) {
+    return <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--muted)]">Connecting…</div>;
+  }
+  if (!session) {
+    return <SignIn onSignIn={signIn} onSignUp={signUp} onReset={resetPassword} notice={notice} />;
+  }
+  if (!profile) {
+    return <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--muted)]">Loading your profile…</div>;
+  }
+  if (!profile.active) {
+    return <NoAccess profile={{ email: profile.email + " (deactivated)" }} onSignOut={signOut} />;
+  }
+  if (profile.role !== "admin" && !profile.access.documents && !profile.access.parties && !profile.access.company) {
+    return <NoAccess profile={profile} onSignOut={signOut} />;
+  }
 
-  const logout = () => { if (user) audit("Signed out"); setSessionUserId(null); writeSession(null); };
-
-  const changeOwnPassword = (pw) => {
-    const salt = makeSalt();
-    setStore((s) => ({
-      ...s,
-      users: s.users.map((u) => (u.id === user.id ? { ...u, salt, hash: hashPassword(pw, salt), mustChangePassword: false, usingDefaultPassword: false } : u)),
-      audit: [{ id: uid(), at: nowISO(), user: user.email, action: "Password changed", detail: "Own account" }, ...s.audit].slice(0, 500),
-    }));
-  };
-
-  if (!user) return <SignIn store={store} onLogin={login} />;
-  if (user.mustChangePassword) return <SetPassword user={user} onChange={changeOwnPassword} onCancel={logout} />;
-
+  const user = profile;
   const sections = NAV.filter((n) => (n.adminOnly ? user.role === "admin" : can(n.needs)));
   const current = sections.find((s) => s.key === active) || sections[0];
-  const ctx = { store, setStore, user, can, audit };
+  const ctx = { store, refresh, user, can, audit, loading };
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -632,6 +711,7 @@ function App() {
               <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">Export console</span>
             </div>
             <div className="flex items-center gap-2">
+              {loading && <span className="text-xs text-[var(--muted)]">syncing…</span>}
               <button onClick={() => setPaletteOpen(true)} className="flex items-center gap-6 rounded-lg border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)]">
                 Search <kbd className="text-xs">⌘K</kbd>
               </button>
@@ -642,7 +722,7 @@ function App() {
               <span className="px-2 text-sm text-[var(--muted)]">
                 {user.name.split(" ")[0]} · <span className="text-[var(--text)]">{user.role}</span>
               </span>
-              <button onClick={logout} className={btnGhost}>Sign out</button>
+              <button onClick={signOut} className={btnGhost}>Sign out</button>
             </div>
           </div>
           <nav className="mx-auto flex max-w-7xl gap-7 px-6">
@@ -660,10 +740,10 @@ function App() {
         </header>
 
         <main className="mx-auto max-w-7xl px-6 py-10">
-          {!storageState.ok && (
+          {notice && (
             <div className="mb-8 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-400">
               <TriangleAlert className="mt-px h-4 w-4 shrink-0" />
-              <span>This browser is blocking local storage for this page, so everything is held in memory and lost on refresh. Serving the file over http://localhost fixes it.</span>
+              <span>{notice}</span>
             </div>
           )}
           {current && current.key === "overview" && <Overview onNavigate={setActive} />}
@@ -681,7 +761,6 @@ function App() {
     </AppCtx.Provider>
   );
 }
-
 /* ------------------------------------------------------------- overview */
 function Stat({ label: text, value, hint }) {
   return (
@@ -858,14 +937,54 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
 }
 
 function PartiesPage() {
-  const { store, setStore, audit } = useApp();
+  const { store, refresh, audit } = useApp();
   const [tab, setTab] = useState("international");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [confirmId, setConfirmId] = useState(null);
+  const [saveError, setSaveError] = useState("");
 
   const filtered = store.parties.filter((p) => p.type === tab);
   const editing = store.parties.find((p) => p.id === editingId);
+
+  // A party and its product lines are saved together: write the party, then
+  // replace its product rows outright. Simpler than diffing, and the list is
+  // always short.
+  const saveParty = async (p, isEdit) => {
+    setSaveError("");
+    try {
+      let partyId = p.id;
+      if (isEdit) {
+        const { error } = await sb.from("parties").update(partyToRow(p)).eq("id", partyId);
+        if (error) throw error;
+        const del = await sb.from("party_products").delete().eq("party_id", partyId);
+        if (del.error) throw del.error;
+      } else {
+        const { data, error } = await sb.from("parties").insert(partyToRow(p)).select("id").single();
+        if (error) throw error;
+        partyId = data.id;
+      }
+      const rows = (p.products || []).filter((x) => x.name).map((x) => productToRow(partyId, x));
+      if (rows.length) {
+        const { error } = await sb.from("party_products").insert(rows);
+        if (error) throw error;
+      }
+      await refresh();
+      return true;
+    } catch (e) {
+      setSaveError(e.message || String(e));
+      return false;
+    }
+  };
+
+  const deleteParty = async (p) => {
+    setSaveError("");
+    const { error } = await sb.from("parties").delete().eq("id", p.id);
+    if (error) { setSaveError(error.message); return; }
+    audit("Party deleted", p.buyerName);
+    setConfirmId(null);
+    await refresh();
+  };
 
   return (
     <div>
@@ -883,17 +1002,21 @@ function PartiesPage() {
         </button>
       </div>
 
-      {showForm && <PartyForm tab={tab} onCancel={() => setShowForm(false)} onSave={(p) => {
-        setStore((s) => ({ ...s, parties: [...s.parties, p] }));
-        audit("Party created", `${p.buyerName} (${p.type})`);
-        setShowForm(false);
+      {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
+
+      {showForm && <PartyForm tab={tab} onCancel={() => setShowForm(false)} onSave={async (p) => {
+        if (await saveParty(p, false)) {
+          audit("Party created", `${p.buyerName} (${p.type})`);
+          setShowForm(false);
+        }
       }} />}
 
-      {editing && <PartyForm tab={editing.type} initial={editing} onCancel={() => setEditingId(null)} onSave={(u) => {
+      {editing && <PartyForm tab={editing.type} initial={editing} onCancel={() => setEditingId(null)} onSave={async (u) => {
         const changes = diffParty(editing, u);
-        setStore((s) => ({ ...s, parties: s.parties.map((p) => (p.id === u.id ? u : p)) }));
-        audit("Party edited", `${u.buyerName} — ${changes.length ? changes.join("; ") : "no field changes"}`);
-        setEditingId(null);
+        if (await saveParty(u, true)) {
+          audit("Party edited", `${u.buyerName} — ${changes.length ? changes.join("; ") : "no field changes"}`);
+          setEditingId(null);
+        }
       }} />}
 
       <div className={card + " overflow-hidden"}>
@@ -916,10 +1039,7 @@ function PartiesPage() {
                   {confirmId === p.id ? (
                     <span className="flex items-center justify-end gap-3">
                       <span className="text-xs text-[var(--danger)]">Delete?</span>
-                      <button onClick={() => {
-                        setStore((s) => ({ ...s, parties: s.parties.filter((x) => x.id !== p.id) }));
-                        audit("Party deleted", p.buyerName); setConfirmId(null);
-                      }} className="text-xs text-[var(--danger)]">Confirm</button>
+                      <button onClick={() => deleteParty(p)} className="text-xs text-[var(--danger)]">Confirm</button>
                       <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--muted)]">Cancel</button>
                     </span>
                   ) : (
@@ -939,27 +1059,11 @@ function PartiesPage() {
   );
 }
 
-/* ---------------------------------------------------------- numbering */
-function useDocNumber() {
-  const { setStore } = useApp();
-  return (seriesKey) => {
-    const year = new Date().getFullYear();
-    let assigned = "";
-    setStore((s) => {
-      const prev = (s.counters[seriesKey] || {})[year] || 0;
-      const next = prev + 1;
-      assigned = `${SERIES_PREFIX[seriesKey]}-${year}-${String(next).padStart(4, "0")}`;
-      return { ...s, counters: { ...s.counters, [seriesKey]: { ...(s.counters[seriesKey] || {}), [year]: next } } };
-    });
-    return assigned;
-  };
-}
-
 /* -------------------------------------------------------- quotations */
 function QuotationsPage() {
-  const { store, setStore, audit } = useApp();
+  const { store, refresh, audit } = useApp();
   const [open, setOpen] = useState(false);
-  const nextDocNo = useDocNumber();
+  const [busy, setBusy] = useState(false);
 
   const [partyId, setPartyId] = useState("");
   const [buyerName, setBuyerName] = useState("");
@@ -982,16 +1086,25 @@ function QuotationsPage() {
     setIgst(false); setIgstRate(0); setItems([{ id: uid(), product: "", hsn: "", boxQty: 0, boxRate: 0 }]); setError("");
   };
 
-  const create = () => {
+  const create = async () => {
     if (!buyerName.trim()) return setError("Buyer name is required.");
-    const docNo = nextDocNo("quotation");
-    const rec = {
-      id: uid(), docNo, date: todayISO(), partyId, buyerName, country, shipmentTerm, paymentTerm,
-      items, igst, igstRate, totalValue: total, igstAmt, grandTotal: grand,
-    };
-    setStore((s) => ({ ...s, quotations: [rec, ...s.quotations] }));
-    audit("Quotation created", `${docNo} — ${buyerName}`);
-    reset(); setOpen(false);
+    setBusy(true); setError("");
+    try {
+      // The number comes from the database so two people cannot take the same one.
+      const docNo = await nextDocNo("quotation");
+      const rec = {
+        docNo, date: todayISO(), partyId, buyerName, country, shipmentTerm, paymentTerm,
+        items, igst, igstRate, totalValue: total, igstAmt, grandTotal: grand,
+      };
+      const { error } = await sb.from("quotations").insert(quotationToRow(rec));
+      if (error) throw error;
+      audit("Quotation created", `${docNo} — ${buyerName}`);
+      await refresh();
+      reset(); setOpen(false);
+    } catch (e) {
+      setError(e.message || String(e));
+    }
+    setBusy(false);
   };
 
   return (
@@ -1247,11 +1360,25 @@ function ProformaForm({ type, onSave, onCancel }) {
 }
 
 function ProformaPage() {
-  const { store, setStore, audit } = useApp();
+  const { store, refresh, audit } = useApp();
   const [form, setForm] = useState(null);
   const [tab, setTab] = useState("open");
-  const nextDocNo = useDocNumber();
+  const [saveError, setSaveError] = useState("");
   const list = tab === "open" ? store.pis.filter((p) => !p.linkedFinalInvoiceId) : store.pis;
+
+  const createProforma = async (pi) => {
+    setSaveError("");
+    try {
+      const docNo = await nextDocNo(pi.type === "international" ? "pi_international" : "pi_domestic");
+      const { error } = await sb.from("proformas").insert(proformaToRow({ ...pi, docNo }));
+      if (error) throw error;
+      audit("Proforma created", `${docNo} — ${pi.buyerName}`);
+      await refresh();
+      setForm(null);
+    } catch (e) {
+      setSaveError(e.message || String(e));
+    }
+  };
 
   return (
     <div>
@@ -1269,13 +1396,8 @@ function ProformaPage() {
         </div>
       </div>
 
-      {form && <ProformaForm type={form} onCancel={() => setForm(null)} onSave={(pi) => {
-        const docNo = nextDocNo(pi.type === "international" ? "pi_international" : "pi_domestic");
-        const rec = { ...pi, docNo };
-        setStore((s) => ({ ...s, pis: [rec, ...s.pis] }));
-        audit("Proforma created", `${docNo} — ${rec.buyerName}`);
-        setForm(null);
-      }} />}
+      {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
+      {form && <ProformaForm type={form} onCancel={() => setForm(null)} onSave={createProforma} />}
 
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
@@ -1464,10 +1586,30 @@ function ShipmentForm({ pi, onSave, onCancel }) {
 }
 
 function ShipmentsPage() {
-  const { store, setStore, audit } = useApp();
+  const { store, refresh, audit } = useApp();
   const [formPiId, setFormPiId] = useState(null);
   const [detailId, setDetailId] = useState(null);
-  const nextDocNo = useDocNumber();
+  const [saveError, setSaveError] = useState("");
+
+  // Writing the shipment and closing its proforma are two statements; if the
+  // second fails the proforma stays open rather than silently vanishing from
+  // the list, which is the safer way round.
+  const createShipment = async (fi) => {
+    setSaveError("");
+    try {
+      const docNo = await nextDocNo("final");
+      const rec = { ...fi, docNo, taxDocNo: docNo + "-TAX", commercialDocNo: docNo + "-COM" };
+      const { data, error } = await sb.from("shipments").insert(shipmentToRow(rec)).select("id").single();
+      if (error) throw error;
+      const link = await sb.from("proformas").update({ shipment_id: data.id }).eq("id", rec.piId);
+      if (link.error) throw link.error;
+      audit("Shipment invoiced", `${docNo} against ${rec.piNo} — ${rec.buyerName}`);
+      await refresh();
+      setFormPiId(null);
+    } catch (e) {
+      setSaveError(e.message || String(e));
+    }
+  };
 
   const openPis = store.pis.filter((p) => !p.linkedFinalInvoiceId);
   const pi = formPiId ? store.pis.find((p) => p.id === formPiId) : null;
@@ -1497,17 +1639,8 @@ function ShipmentsPage() {
         </div>
       )}
 
-      {pi && <ShipmentForm pi={pi} onCancel={() => setFormPiId(null)} onSave={(fi) => {
-        const docNo = nextDocNo("final");
-        const rec = { ...fi, docNo, taxDocNo: docNo + "-TAX", commercialDocNo: docNo + "-COM" };
-        setStore((s) => ({
-          ...s,
-          finalInvoices: [rec, ...s.finalInvoices],
-          pis: s.pis.map((p) => (p.id === rec.piId ? { ...p, linkedFinalInvoiceId: rec.id } : p)),
-        }));
-        audit("Shipment invoiced", `${docNo} against ${rec.piNo} — ${rec.buyerName}`);
-        setFormPiId(null);
-      }} />}
+      {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
+      {pi && <ShipmentForm pi={pi} onCancel={() => setFormPiId(null)} onSave={createShipment} />}
 
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
@@ -1586,11 +1719,22 @@ function AnalyticsPage() {
 
 /* ------------------------------------------------------------- company */
 function CompanyPage() {
-  const { store, setStore, audit } = useApp();
+  const { store, refresh, audit } = useApp();
   const [draft, setDraft] = useState(store.company);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const dirty = COMPANY_KEYS.some((k) => (draft[k] || "") !== (store.company[k] || ""));
   const set = (k, v) => { setDraft({ ...draft, [k]: v }); setSaved(false); };
+
+  const save = async () => {
+    setSaveError("");
+    const changes = diffObject(store.company, draft, COMPANY_KEYS);
+    const { error } = await sb.from("company_profile").update(companyToRow(draft)).eq("id", 1);
+    if (error) { setSaveError(error.message); return; }
+    audit("Company profile edited", changes.length ? changes.join("; ") : "no field changes");
+    await refresh();
+    setSaved(true);
+  };
 
   return (
     <div>
@@ -1607,13 +1751,9 @@ function CompanyPage() {
           <Field label="IEC code"><input className={input} value={draft.iecCode} onChange={(e) => set("iecCode", e.target.value)} /></Field>
         </div>
         <div className="mt-6 flex items-center justify-end gap-4">
+          {saveError && <span className={errText}>{saveError}</span>}
           {saved && !dirty && <span className="flex items-center gap-1 text-xs text-emerald-400"><Check className="h-3.5 w-3.5" /> Saved</span>}
-          <button disabled={!dirty} className={btn} onClick={() => {
-            const changes = diffObject(store.company, draft, COMPANY_KEYS);
-            setStore((s) => ({ ...s, company: draft }));
-            audit("Company profile edited", changes.length ? changes.join("; ") : "no field changes");
-            setSaved(true);
-          }}>Save changes</button>
+          <button disabled={!dirty} className={btn} onClick={save}>Save changes</button>
         </div>
       </div>
     </div>
@@ -1622,77 +1762,48 @@ function CompanyPage() {
 
 /* --------------------------------------------------------------- users */
 function UsersPage() {
-  const { store, setStore, user, audit } = useApp();
-  const [name, setName] = useState("");
-  const [emailValue, setEmailValue] = useState("");
-  const [role, setRole] = useState("staff");
-  const [access, setAccess] = useState({ documents: false, parties: false, company: false });
+  const { store, refresh, user, audit } = useApp();
   const [error, setError] = useState("");
-  const [issued, setIssued] = useState(null);
   const [auditFilter, setAuditFilter] = useState("");
-  const [importError, setImportError] = useState("");
   const [showAudit, setShowAudit] = useState(false);
 
-  const resetForm = () => { setName(""); setEmailValue(""); setRole("staff"); setAccess({ documents: false, parties: false, company: false }); };
-
-  const createUser = () => {
-    if (!name.trim()) return setError("Name is required.");
-    const mail = emailValue.trim() || `${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, ".")}@dassuperfoods.in`;
-    if (store.users.some((u) => u.email.toLowerCase() === mail.toLowerCase())) return setError("That email already has an account.");
-    const pw = tempPassword();
-    const salt = makeSalt();
-    const rec = {
-      id: uid(), name: name.trim(), email: mail, role,
-      access: role === "admin" ? { documents: true, parties: true, company: true } : { ...access },
-      salt, hash: hashPassword(pw, salt), active: true,
-      mustChangePassword: true, usingDefaultPassword: false, createdAt: nowISO(), lastLogin: null,
-    };
-    setStore((s) => ({ ...s, users: [...s.users, rec] }));
-    audit("User created", `${rec.email} — ${rec.role}`);
-    setIssued({ email: rec.email, password: pw });
-    setError(""); resetForm();
-  };
-
-  const patchUser = (id, patch, action, detail) => {
-    setStore((s) => ({ ...s, users: s.users.map((u) => (u.id === id ? { ...u, ...patch } : u)) }));
+  // Accounts are created by the person themselves at the sign-in screen.
+  // Admins never handle anyone's password — they grant sections afterwards.
+  const patchProfile = async (u, patch, action, detail) => {
+    setError("");
+    const { error: err } = await sb.from("profiles").update(patch).eq("id", u.id);
+    if (err) { setError(err.message); return; }
     if (action) audit(action, detail);
-  };
-
-  const resetPassword = (u) => {
-    const pw = tempPassword();
-    const salt = makeSalt();
-    patchUser(u.id, { salt, hash: hashPassword(pw, salt), mustChangePassword: true }, "Password reset", u.email);
-    setIssued({ email: u.email, password: pw });
+    await refresh();
   };
 
   const toggleAccess = (u, key) => {
     if (u.role === "admin") return;
-    const next = { ...(u.access || {}), [key]: !(u.access || {})[key] };
-    patchUser(u.id, { access: next }, "Access changed", `${u.email} — ${key} ${next[key] ? "granted" : "revoked"}`);
+    const column = { documents: "access_documents", parties: "access_parties", company: "access_company" }[key];
+    const next = !(u.access || {})[key];
+    patchProfile(u, { [column]: next }, "Access changed", `${u.email} — ${key} ${next ? "granted" : "revoked"}`);
+  };
+
+  const setRole = (u, role) => {
+    const grantAll = role === "admin";
+    patchProfile(
+      u,
+      grantAll
+        ? { role, access_documents: true, access_parties: true, access_company: true }
+        : { role },
+      "Role changed",
+      `${u.email} — now ${role}`
+    );
   };
 
   const exportBackup = () => {
     const blob = new Blob([JSON.stringify(store, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `das-superfoods-backup-${todayISO()}.json`;
+    a.href = url; a.download = `das-superfoods-export-${todayISO()}.json`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    audit("Backup exported");
-  };
-
-  const importBackup = (file) => {
-    setImportError("");
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(String(reader.result));
-        if (!data.users) throw new Error("This file doesn't look like a console backup.");
-        if (!window.confirm("Replace everything in this browser with the backup?")) return;
-        setStore(data);
-      } catch (e) { setImportError(e && e.message ? e.message : String(e)); }
-    };
-    reader.readAsText(file);
+    audit("Data exported", "");
   };
 
   const filteredAudit = store.audit.filter((a) =>
@@ -1702,50 +1813,19 @@ function UsersPage() {
     <div>
       <PageHead
         title="Users & access"
-        blurb="One core Admin role plus custom access profiles. Staff see only the sections they're granted — Party master and Company profile stay hidden without access. Every change lands in the audit log."
+        blurb="One core Admin role plus per-section grants. Staff register themselves and arrive with no access at all — you decide what each of them can reach. Party master and Company profile stay hidden without a grant, and every change lands in the audit log."
       />
 
-      <div className={card + " mb-6 p-6"}>
-        <p className="mb-5 text-sm font-medium">Add a user</p>
-        <div className="grid gap-5 lg:grid-cols-[1fr_1fr_1fr_auto]">
-          <Field label="Name"><input className={input} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} /></Field>
-          <Field label="Email"><input className={input} value={emailValue} onChange={(e) => { setEmailValue(e.target.value); setError(""); }} /></Field>
-          <Field label="Role">
-            <select className={input} value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="staff">Staff (custom access)</option>
-              <option value="admin">Admin (full access)</option>
-            </select>
-          </Field>
-          <div>
-            <span className={label}>Section access</span>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {ACCESS_KEYS.map((a) => (
-                <label key={a.key} className="flex items-center gap-2 text-sm text-[var(--muted)]" title={a.note}>
-                  <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" disabled={role === "admin"}
-                    checked={role === "admin" ? true : access[a.key]}
-                    onChange={() => setAccess({ ...access, [a.key]: !access[a.key] })} />
-                  {a.label}
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="mt-5 flex items-center justify-between">
-          <span className={errText}>{error}</span>
-          <button onClick={createUser} className={btn}>Create user</button>
-        </div>
+      <div className={card + " mb-6 p-5"}>
+        <p className="text-sm font-medium">How people join</p>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--muted)]">
+          Send them this address and ask them to pick <span className="text-[var(--text)]">Create account</span> with their own
+          work email and a password only they know. They will appear in the table below with nothing ticked. Nobody shares a
+          login, and nobody — including you — can see anyone else's password.
+        </p>
       </div>
 
-      {issued && (
-        <div className={card + " mb-6 flex items-start justify-between gap-4 border-[var(--accent)]/40 p-5"}>
-          <div>
-            <p className="text-sm font-medium">Temp password for {issued.email}</p>
-            <p className="mt-1 font-mono text-lg text-[var(--accent)]">{issued.password}</p>
-            <p className="mt-1 text-xs text-[var(--muted)]">Shown once. Pass it on over a secure channel — they set their own password on first sign-in.</p>
-          </div>
-          <button onClick={() => setIssued(null)}><X className="h-4 w-4 text-[var(--muted)]" /></button>
-        </div>
-      )}
+      {error && <p className={errText + " mb-4"}>{error}</p>}
 
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
@@ -1772,32 +1852,35 @@ function UsersPage() {
                     </span>
                   )}
                 </td>
-                <td className={td + " text-xs text-[var(--muted)]"}>
-                  {u.lastLogin ? fmtWhen(u.lastLogin) : (u.mustChangePassword ? "password pending" : "never")}
-                </td>
+                <td className={td + " text-xs text-[var(--muted)]"}>{u.lastLogin ? fmtWhen(u.lastLogin) : "never"}</td>
                 <td className={td + " text-right"}>
                   <span className="flex items-center justify-end gap-4">
-                    <button onClick={() => resetPassword(u)} className="flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--text)]">
-                      <KeyRound className="h-3 w-3" /> Reset
-                    </button>
                     {u.id !== user.id && (
-                      <button onClick={() => patchUser(u.id, { active: !u.active }, u.active ? "User deactivated" : "User reactivated", u.email)}
-                        className="text-xs text-[var(--muted)] hover:text-[var(--danger)]">
-                        {u.active ? "Deactivate" : "Reactivate"}
-                      </button>
+                      <React.Fragment>
+                        <button onClick={() => setRole(u, u.role === "admin" ? "staff" : "admin")}
+                          className="text-xs text-[var(--muted)] hover:text-[var(--text)]">
+                          {u.role === "admin" ? "Make staff" : "Make admin"}
+                        </button>
+                        <button onClick={() => patchProfile(u, { active: !u.active }, u.active ? "User deactivated" : "User reactivated", u.email)}
+                          className="text-xs text-[var(--muted)] hover:text-[var(--danger)]">
+                          {u.active ? "Deactivate" : "Reactivate"}
+                        </button>
+                      </React.Fragment>
                     )}
                     {!u.active && <Chip tone="off">Inactive</Chip>}
                   </span>
                 </td>
               </tr>
             ))}
+            {store.users.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--muted)]">Nobody has registered yet.</td></tr>}
           </tbody>
         </table>
       </div>
 
       <p className="mt-4 max-w-4xl text-xs leading-relaxed text-[var(--muted)]">
-        Note: staff need the Documents permission to work with quotations, proforma invoices and shipments. Temp passwords are
-        shown once — pass them on over a secure channel and ask the user to change theirs from the sign-in prompt immediately.
+        Note: staff need the Documents grant to work with quotations, proforma invoices and shipments. Deactivating someone
+        blocks their sign-in immediately without deleting anything they created. Forgotten passwords are handled by the
+        person themselves through <span className="text-[var(--text)]">Forgotten your password?</span> on the sign-in screen.
       </p>
 
       <div className="mt-8 flex items-center gap-3">
@@ -1805,14 +1888,8 @@ function UsersPage() {
           <History className="h-4 w-4" /> {showAudit ? "Hide" : "Show"} audit log ({store.audit.length})
         </button>
         <button onClick={exportBackup} className={btnGhost + " flex items-center gap-1.5"}>
-          <Download className="h-4 w-4" /> Export backup
+          <Download className="h-4 w-4" /> Export a snapshot
         </button>
-        <label className={btnGhost + " flex cursor-pointer items-center gap-1.5"}>
-          <Upload className="h-4 w-4" /> Import backup
-          <input type="file" accept="application/json,.json" className="hidden"
-            onChange={(e) => { if (e.target.files && e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ""; }} />
-        </label>
-        {importError && <span className={errText}>{importError}</span>}
       </div>
 
       {showAudit && (

@@ -28,12 +28,38 @@ while ($true) {
 
     $requestLine = $reader.ReadLine()
     if (-not $requestLine) { $client.Close(); continue }
-    while ($true) { $h = $reader.ReadLine(); if ($null -eq $h -or $h -eq "") { break } }
+    $contentLength = 0
+    while ($true) {
+      $h = $reader.ReadLine()
+      if ($null -eq $h -or $h -eq "") { break }
+      if ($h -match '^(?i)content-length:\s*(\d+)') { $contentLength = [int]$matches[1] }
+    }
 
     $parts = $requestLine.Split(" ")
     $method = $parts[0]
     $path = [System.Uri]::UnescapeDataString($parts[1].Split("?")[0])
     if ($path -eq "/") { $path = "/index.html" }
+
+    # POST /save/<name> writes a base64 body to disk. Used to get browser-compiled
+    # output back onto the filesystem without a Node toolchain.
+    if ($method -eq "POST" -and $path -like "/save/*") {
+      $buf = New-Object char[] $contentLength
+      $read = 0
+      while ($read -lt $contentLength) {
+        $n = $reader.Read($buf, $read, $contentLength - $read)
+        if ($n -le 0) { break }
+        $read += $n
+      }
+      $name = [System.IO.Path]::GetFileName($path.Substring(6))
+      $dest = Join-Path $Root $name
+      [System.IO.File]::WriteAllBytes($dest, [System.Convert]::FromBase64String(-join $buf))
+      Write-Host "POST $path -> wrote $dest ($((Get-Item $dest).Length) bytes)"
+      $msg = [System.Text.Encoding]::UTF8.GetBytes("saved $name")
+      $hdr = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/plain`r`nContent-Length: $($msg.Length)`r`nAccess-Control-Allow-Origin: *`r`nConnection: close`r`n`r`n")
+      $stream.Write($hdr, 0, $hdr.Length); $stream.Write($msg, 0, $msg.Length); $stream.Flush()
+      $client.Close()
+      continue
+    }
 
     $full = Join-Path $Root ($path.TrimStart("/") -replace "/", "\")
     $rootFull = (Resolve-Path $Root).Path

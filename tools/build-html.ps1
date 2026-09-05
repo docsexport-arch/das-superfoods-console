@@ -29,6 +29,7 @@ $react    = Get-Cached "https://unpkg.com/react@18.3.1/umd/react.production.min.
 $reactDom = Get-Cached "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" "react-dom.js"
 $babel    = Get-Cached "https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"            "babel.js"
 $tailwind = Get-Cached "https://cdn.tailwindcss.com/3.4.16"                                 "tailwind.js"
+$supabase = Get-Cached "https://unpkg.com/@supabase/supabase-js@2.47.10/dist/umd/supabase.js" "supabase.js"
 
 # --- icons: pull just the ones the app uses out of lucide-static ---------------
 $iconNames = @(
@@ -103,6 +104,7 @@ $template = @'
   <script>/* react */ __REACT__</script>
   <script>/* react-dom */ __REACT_DOM__</script>
   <script>/* tailwind */ __TAILWIND__</script>
+  <script src="supabase.js"></script>
   <script>/* babel */ __BABEL__</script>
   <script>window.__LUCIDE_ICONS__ = __ICONS__;</script>
   <script>
@@ -134,5 +136,6 @@ $html = $template.
   Replace("__APP__", $app)
 
 [System.IO.File]::WriteAllText($Out, $html, (New-Object System.Text.UTF8Encoding($false)))
+Copy-Item (Join-Path $vendorDir "supabase.js") (Join-Path (Split-Path -Parent $Out) "supabase.js") -Force
 $size = [Math]::Round((Get-Item $Out).Length / 1MB, 2)
 Write-Host "Built $Out ($size MB)"
