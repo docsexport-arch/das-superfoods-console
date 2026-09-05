@@ -359,3 +359,36 @@ create policy counters_no_direct on public.doc_counters for select using (public
 --  3. Every account after that starts with no sections until you grant them
 --     under Users & access.
 -- ================================================================
+
+-- =====================================================================
+--  Applied 2026-09-05 to project jvpziatizbaghxhyslrg (ap-south-1)
+-- =====================================================================
+
+-- Realtime: broadcast row changes so two people working at the same time
+-- see each other's edits without reloading. Realtime respects RLS, so each
+-- client only receives rows their own grants already allow them to read.
+alter publication supabase_realtime add table public.parties;
+alter publication supabase_realtime add table public.party_products;
+alter publication supabase_realtime add table public.quotations;
+alter publication supabase_realtime add table public.proformas;
+alter publication supabase_realtime add table public.shipments;
+alter publication supabase_realtime add table public.company_profile;
+alter publication supabase_realtime add table public.profiles;
+alter publication supabase_realtime add table public.audit_log;
+
+alter table public.parties        replica identity full;
+alter table public.party_products replica identity full;
+alter table public.quotations     replica identity full;
+alter table public.proformas      replica identity full;
+alter table public.shipments      replica identity full;
+
+-- Lock down the SECURITY DEFINER helpers. handle_new_user is a trigger
+-- function and must not be reachable over the REST API at all; the others
+-- stay callable by signed-in users because RLS policies evaluate them.
+revoke all     on function public.handle_new_user()      from anon, authenticated, public;
+revoke execute on function public.is_admin()             from anon, public;
+revoke execute on function public.has_access(text)       from anon, public;
+revoke execute on function public.next_doc_no(text)      from anon, public;
+grant  execute on function public.is_admin()        to authenticated;
+grant  execute on function public.has_access(text)  to authenticated;
+grant  execute on function public.next_doc_no(text) to authenticated;
