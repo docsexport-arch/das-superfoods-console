@@ -17,7 +17,13 @@ if (target) {
   const page = await (await fetch(target)).text();
   const urls = [...page.matchAll(/src="([^"]+\.js)"/g)].map((m) => new URL(m[1], target).href);
   if (!urls.length) failures.push(`no script found on ${target}`);
-  for (const url of urls) scripts.push({ name: url, text: await (await fetch(url)).text() });
+  for (const url of urls) {
+    const res = await fetch(url);
+    // Say what actually happened: a script that is not being served yet is a
+    // different failure from a bundle that points at the wrong backend.
+    if (!res.ok) failures.push(`${url} answered HTTP ${res.status} — the deployment may still be propagating`);
+    scripts.push({ name: url, text: res.ok ? await res.text() : "" });
+  }
 } else {
   const dir = join(process.cwd(), "dist", "assets");
   if (!existsSync(dir)) {
