@@ -392,3 +392,33 @@ revoke execute on function public.next_doc_no(text)      from anon, public;
 grant  execute on function public.is_admin()        to authenticated;
 grant  execute on function public.has_access(text)  to authenticated;
 grant  execute on function public.next_doc_no(text) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- Migration 5: pin admin to the owner's address
+-- Originally the FIRST account to sign up became admin. With a public
+-- sign-up page that is a race a stranger could win, so the owner is named
+-- explicitly instead. Change the address below if ownership moves.
+-- ---------------------------------------------------------------------
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  is_owner boolean;
+begin
+  is_owner := lower(coalesce(new.email, '')) = 'docs.export@dasfoodindia.com';
+
+  insert into public.profiles (id, full_name, email, role, access_documents, access_parties, access_company)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data ->> 'full_name', ''),
+    coalesce(new.email, ''),
+    case when is_owner then 'admin' else 'staff' end,
+    is_owner, is_owner, is_owner
+  );
+  return new;
+end;
+$$;
+
+revoke all on function public.handle_new_user() from anon, authenticated, public;

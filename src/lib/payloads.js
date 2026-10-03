@@ -1,0 +1,48 @@
+// What the client sends to each write RPC — named once.
+//
+// An RPC reads its payload key by key, so a key it does not read is silently
+// thrown away (Build Bible §6). These lists are the contract:
+// tests/rpc-contract.test.js reads db/*.sql and fails the build if any key
+// listed here is not read by the function it is sent to. Extend the SQL and
+// the list in the same commit.
+export const PARTY_KEYS = [
+  "id", "type", "buyerName", "buyerAddress", "consigneeName", "consigneeAddress",
+  "consigneeOptions", "country", "currency", "shipmentTerm", "paymentTerm",
+  "conditions", "portOfLoading", "destinationPort", "products",
+];
+export const PARTY_PRODUCT_KEYS = [
+  "id", "name", "hsn", "rate", "mrp", "netWt", "grossWt", "packsPerBox", "weightPerPackG",
+];
+export const QUOTATION_KEYS = [
+  "id", "partyId", "buyerName", "buyerAddress", "country", "shipmentTerm",
+  "paymentTerm", "igst", "igstRate", "items", "expectedUpdatedAt",
+];
+export const PROFORMA_KEYS = [
+  "type", "partyId", "quotationRef", "buyerName", "buyerAddress", "consigneeName",
+  "consigneeAddress", "consigneeOptions", "portOfLoading", "destinationPort",
+  "shipmentTerm", "paymentTerm", "conditions", "currency", "buyerOrderNo",
+  "buyerOrderDate", "additionalDetails", "taxRate", "items",
+];
+export const SHIPMENT_KEYS = [
+  "piId", "items", "freight", "otherAdj", "otherReason", "gstPercent", "roundOff",
+  "exchangeRate", "commercialCurrency", "commercialConsignee", "taxConsignee",
+  "containerNo", "vehicleNo", "customSeal", "lineSeal", "portOfLoading", "incoterm",
+];
+export const COMPANY_KEYS = [
+  "name", "address", "bankName", "accountNo", "ifsc", "swift", "gstNo", "iecCode",
+];
+export const USER_ACCESS_KEYS = ["role", "fullName", "active", "documents", "parties", "company"];
+
+// Which function each list is sent to — used by the contract test.
+export const RPC_CONTRACT = {
+  save_party: [...PARTY_KEYS, ...PARTY_PRODUCT_KEYS],
+  save_quotation: QUOTATION_KEYS,
+  create_proforma: PROFORMA_KEYS,
+  create_shipment: SHIPMENT_KEYS,
+  save_company: COMPANY_KEYS,
+  set_user_access: USER_ACCESS_KEYS,
+};
+
+// Copies only the named keys, skipping any that are undefined.
+export const pick = (obj, keys) =>
+  Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]));

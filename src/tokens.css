@@ -1,0 +1,123 @@
+/* =====================================================================
+   Blend — the house design language (Build Bible §13).
+   Every colour, font and easing in the console is defined HERE and nowhere
+   else. Components reference tokens only; a hex in a component is a defect
+   (tests/guards.test.js fails the build on one).
+   ===================================================================== */
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: "Space Grotesk", ui-monospace, "SF Mono", Consolas, monospace;
+  --ease-emil: cubic-bezier(.23, 1, .32, 1);
+}
+
+/* Dark is the default. */
+:root {
+  --bg: #141312;
+  --panel: #1B1A18;
+  --card: #1E1C1A;
+  --field: #262320;
+  --line: #333029;
+  --text: #EFECE8;
+  --muted: #A19A92;
+  --faint: #6F6862;
+
+  /* Terracotta. Settled — do not swap it. */
+  --accent: #FF7A45;
+  --accent-ink: #1A0E07;
+
+  --status-ok: #5FCB8F;
+  --status-warn: #E5B454;
+  --status-danger: #F87171;
+  --status-info: #7DB3E8;
+
+  --scrim: rgb(0 0 0 / 0.55);
+  color-scheme: dark;
+}
+
+/* A true light theme — paper and ink, not an inversion. */
+:root[data-theme="light"] {
+  --bg: #FBFAF7;
+  --panel: #F3F0EA;
+  --card: #FFFFFF;
+  --field: #FFFFFF;
+  --line: #E3DDD5;
+  --text: #1A1815;
+  --muted: #6B645C;
+  --faint: #9A938A;
+
+  --accent: #E2562B;
+  --accent-ink: #FFFFFF;
+
+  --status-ok: #1F8A4C;
+  --status-warn: #A8700A;
+  --status-danger: #B42318;
+  --status-info: #1D5FA8;
+
+  --scrim: rgb(26 24 21 / 0.4);
+  color-scheme: light;
+}
+
+/* A printed document is ink on white paper whichever theme is on screen. */
+:root {
+  --print-paper: #FFFFFF;
+  --print-ink: #111111;
+  --print-muted: #555555;
+  --print-rule: #999999;
+  --print-fill: #F1F1F1;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+::selection { background: var(--accent); color: var(--accent-ink); }
+
+/* Keyboard focus is always visible. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute; left: 12px; top: -48px; z-index: 100;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--accent); color: var(--accent-ink);
+}
+.skip-link:focus { top: 12px; }
+
+/* Polish is mostly the absence of motion — and none at all if asked. */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------------------------------------------ print */
+#print-portal { display: none; }
+
+@media print {
+  body > *:not(#print-portal) { display: none !important; }
+  #print-portal { display: block !important; }
+  html, body { background: var(--print-paper); }
+  @page { size: A4; margin: 14mm; }
+}
+
+#print-portal .doc {
+  color: var(--print-ink);
+  background: var(--print-paper);
+  font: 12px/1.5 Georgia, "Times New Roman", serif;
+}
+#print-portal .doc h1 { font-size: 20px; letter-spacing: 0.12em; text-transform: uppercase; margin: 0; }
+#print-portal .doc table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+#print-portal .doc th,
+#print-portal .doc td { border: 1px solid var(--print-rule); padding: 6px 8px; text-align: left; }
+#print-portal .doc th { background: var(--print-fill); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+#print-portal .doc .num { text-align: right; font-variant-numeric: tabular-nums; }
+#print-portal .doc .muted { color: var(--print-muted); }
+#print-portal .doc .rule { border-bottom: 2px solid var(--print-ink); margin: 10px 0 14px; }

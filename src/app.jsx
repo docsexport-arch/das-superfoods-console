@@ -1,369 +1,31 @@
-/* =====================================================================
-   Das Superfoods — Export console
-   Single-file build. This source is embedded in Das-Superfoods-ERP.html
-   and compiled in the browser, so it can be edited in place.
-   ===================================================================== */
+// Das Superfoods — Export console.
+// Screens only. Data access is in lib/db.js, arithmetic in lib/money.js,
+// formatting in lib/format.js, and every colour and font in tokens.css.
+import React, { useState, useEffect, useRef, useCallback, useContext, createContext } from "react";
+import { createPortal } from "react-dom";
+import {
+  Lock, Plus, X, ChevronRight, Check, Trash2, Boxes, KeyRound, History,
+  Download, TriangleAlert, Search, Sun, Moon,
+} from "lucide-react";
+import { BOOT_TIMEOUT_MS } from "./config.js";
+import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, withTimeout, humanise } from "./lib/db.js";
+import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes } from "./lib/format.js";
+import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
+import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
+import {
+  pick, PARTY_KEYS, PARTY_PRODUCT_KEYS, QUOTATION_KEYS, PROFORMA_KEYS, SHIPMENT_KEYS, COMPANY_KEYS,
+} from "./lib/payloads.js";
+import {
+  card, panel, input, btn, btnGhost, th, td, tdNum, label, errText,
+  Field, Chip, PageHead, ErrorPanel, ExcelButton, Dialog,
+} from "./ui.jsx";
 
-const { useState, useMemo, useEffect, useRef, useContext, createContext } = React;
-
-/* ---------------------------------------------------------------- icons */
-const ICON_DATA = window.__LUCIDE_ICONS__ || {};
-function mkIcon(key) {
-  const inner = ICON_DATA[key] || '<circle cx="12" cy="12" r="9" />';
-  function Icon({ className = "", size = 24, ...rest }) {
-    return (
-      <svg
-        xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
-        fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        className={("lucide " + className).trim()}
-        dangerouslySetInnerHTML={{ __html: inner }}
-        {...rest}
-      />
-    );
-  }
-  return Icon;
-}
-
-const Users = mkIcon("users");
-const FileText = mkIcon("file-text");
-const ClipboardList = mkIcon("clipboard-list");
-const Receipt = mkIcon("receipt");
-const Building2 = mkIcon("building-2");
-const Ship = mkIcon("ship");
-const Lock = mkIcon("lock");
-const Plus = mkIcon("plus");
-const X = mkIcon("x");
-const ChevronRight = mkIcon("chevron-right");
-const Check = mkIcon("check");
-const Trash2 = mkIcon("trash-2");
-const ShieldCheck = mkIcon("shield-check");
-const Boxes = mkIcon("boxes");
-const KeyRound = mkIcon("key-round");
-const History = mkIcon("history");
-const Download = mkIcon("download");
-const Upload = mkIcon("upload");
-const TriangleAlert = mkIcon("triangle-alert");
-const Search = mkIcon("search");
-const Sun = mkIcon("sun");
-const Moon = mkIcon("moon");
-
-/* ------------------------------------------------------------- styling */
-const card = "rounded-xl border border-[var(--line)] bg-[var(--card)]";
-const panel = "rounded-xl border border-[var(--line)] bg-[var(--panel)]";
-const input = "w-full rounded-lg border border-[var(--line)] bg-[var(--field)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--faint)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50";
-const btn = "rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90 disabled:opacity-40";
-const btnGhost = "rounded-lg border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)]";
-const th = "px-4 py-3 text-left text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]";
-const td = "px-4 py-3 text-sm";
-const label = "block text-sm font-medium text-[var(--text)] mb-2";
-const errText = "text-sm text-[var(--danger)]";
-
-function Field({ label: labelText, children, className = "", hint }) {
-  return (
-    <label className={"block " + className}>
-      <span className={label}>{labelText}</span>
-      {children}
-      {hint && <span className="mt-1.5 block text-xs text-[var(--muted)]">{hint}</span>}
-    </label>
-  );
-}
-
-function Chip({ children, tone = "neutral" }) {
-  const tones = {
-    neutral: "border-[var(--line)] text-[var(--muted)]",
-    accent: "border-[var(--accent)]/40 text-[var(--accent)]",
-    ok: "border-emerald-500/40 text-emerald-400",
-    warn: "border-amber-500/40 text-amber-400",
-    off: "border-[var(--line)] text-[var(--faint)]",
-  };
-  return <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] ${tones[tone]}`}>{children}</span>;
-}
-
-function PageHead({ title, blurb }) {
-  return (
-    <div className="mb-8">
-      <h1 className="font-serif text-3xl tracking-tight text-[var(--text)]">{title}</h1>
-      {blurb && <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--muted)]">{blurb}</p>}
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------- helpers */
-const CURRENCY_SYMBOL = { USD: "$", INR: "₹" };
-
-const ONES = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
-  "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
-const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-
-function chunkToWords(n) {
-  if (n === 0) return "";
-  if (n < 20) return ONES[n];
-  if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? " " + ONES[n % 10] : "");
-  return ONES[Math.floor(n / 100)] + " hundred" + (n % 100 ? " " + chunkToWords(n % 100) : "");
-}
-
-function numberToWords(value) {
-  const num = Math.round(Number(value) || 0);
-  if (num === 0) return "zero";
-  const parts = [];
-  let rem = num;
-  const billions = Math.floor(rem / 1e9); rem %= 1e9;
-  const millions = Math.floor(rem / 1e6); rem %= 1e6;
-  const thousands = Math.floor(rem / 1e3); rem %= 1e3;
-  if (billions) parts.push(chunkToWords(billions) + " billion");
-  if (millions) parts.push(chunkToWords(millions) + " million");
-  if (thousands) parts.push(chunkToWords(thousands) + " thousand");
-  if (rem) parts.push(chunkToWords(rem));
-  return parts.join(" ");
-}
-
-function fmtMoney(value, currency) {
-  const n = Math.round((Number(value) || 0) * 100) / 100;
-  return `${CURRENCY_SYMBOL[currency] || ""}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function fmtNum(value, digits = 2) {
-  const n = Number(value) || 0;
-  return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
-}
-
-const uid = () => Math.random().toString(36).slice(2, 10);
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const nowISO = () => new Date().toISOString();
-const fmtWhen = (iso) => { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } };
-
-
-/* ------------------------------------------------------ supabase client */
-const SUPABASE_URL = "https://jvpziatizbaghxhyslrg.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2cHppYXRpemJhZ2h4aHlzbHJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1OTMxMDQsImV4cCI6MjEwNDE2OTEwNH0.v0eTuaSb040cPFDyGLMU4v8epUSj0OUDV7KtADuxcTY";
 const THEME_KEY = "das-superfoods-erp/theme";
 
-// The anon key is meant to be public: every request it makes is still filtered
-// by the row-level security policies in the database.
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true },
-});
-
-/* ------------------------------------------------ row to object mapping */
-/* The database speaks snake_case; the screens speak camelCase. Keeping the
-   translation here means no component has to know about the database.    */
-const num = (v) => Number(v) || 0;
-
-const partyFromRow = (r, products) => ({
-  id: r.id, type: r.type,
-  buyerName: r.buyer_name, buyerAddress: r.buyer_address,
-  consigneeName: r.consignee_name, consigneeAddress: r.consignee_address,
-  consigneeOptions: r.consignee_options || [],
-  country: r.country, currency: r.currency,
-  shipmentTerm: r.shipment_term, paymentTerm: r.payment_term, conditions: r.conditions,
-  portOfLoading: r.port_of_loading, destinationPort: r.destination_port,
-  products: (products || []).map((p) => ({
-    id: p.id, name: p.name, hsn: p.hsn,
-    rate: num(p.rate), mrp: num(p.mrp),
-    netWt: num(p.net_wt), grossWt: num(p.gross_wt),
-    packsPerBox: num(p.packs_per_box), weightPerPackG: num(p.weight_per_pack_g),
-  })),
-});
-
-const partyToRow = (p) => ({
-  type: p.type,
-  buyer_name: p.buyerName, buyer_address: p.buyerAddress,
-  consignee_name: p.consigneeName, consignee_address: p.consigneeAddress,
-  consignee_options: p.consigneeOptions || [],
-  country: p.country, currency: p.currency,
-  shipment_term: p.shipmentTerm, payment_term: p.paymentTerm, conditions: p.conditions,
-  port_of_loading: p.portOfLoading, destination_port: p.destinationPort,
-});
-
-const productToRow = (partyId, p) => ({
-  party_id: partyId, name: p.name, hsn: p.hsn,
-  rate: num(p.rate), mrp: num(p.mrp),
-  net_wt: num(p.netWt), gross_wt: num(p.grossWt),
-  packs_per_box: num(p.packsPerBox), weight_per_pack_g: num(p.weightPerPackG),
-});
-
-const quotationFromRow = (r) => ({
-  id: r.id, docNo: r.doc_no, date: r.doc_date, partyId: r.party_id,
-  buyerName: r.buyer_name, buyerAddress: r.buyer_address, country: r.country,
-  shipmentTerm: r.shipment_term, paymentTerm: r.payment_term,
-  igst: r.igst, igstRate: num(r.igst_rate),
-  totalValue: num(r.total_value), igstAmt: num(r.igst_amount), grandTotal: num(r.grand_total),
-  items: r.items || [],
-});
-
-const quotationToRow = (q) => ({
-  doc_no: q.docNo, doc_date: q.date, party_id: q.partyId || null,
-  buyer_name: q.buyerName, buyer_address: q.buyerAddress || "", country: q.country,
-  shipment_term: q.shipmentTerm, payment_term: q.paymentTerm || "",
-  igst: Boolean(q.igst), igst_rate: num(q.igstRate),
-  total_value: num(q.totalValue), igst_amount: num(q.igstAmt), grand_total: num(q.grandTotal),
-  items: q.items || [],
-});
-
-const proformaFromRow = (r) => ({
-  id: r.id, docNo: r.doc_no, date: r.doc_date, type: r.type, partyId: r.party_id,
-  quotationRef: r.quotation_ref,
-  buyerName: r.buyer_name, buyerAddress: r.buyer_address,
-  consigneeName: r.consignee_name, consigneeAddress: r.consignee_address,
-  consigneeOptions: r.consignee_options || [],
-  portOfLoading: r.port_of_loading, destinationPort: r.destination_port,
-  shipmentTerm: r.shipment_term, paymentTerm: r.payment_term, conditions: r.conditions,
-  currency: r.currency, buyerOrderNo: r.order_no, buyerOrderDate: r.order_date,
-  additionalDetails: r.additional_details,
-  totalBoxes: r.total_boxes, totalValue: num(r.total_value), taxableValue: num(r.taxable_value),
-  taxRate: num(r.tax_rate), taxAmount: num(r.tax_amount), grandTotal: num(r.grand_total),
-  items: r.items || [],
-  linkedFinalInvoiceId: r.shipment_id,
-});
-
-const proformaToRow = (p) => ({
-  doc_no: p.docNo, doc_date: p.date, type: p.type, party_id: p.partyId || null,
-  quotation_ref: p.quotationRef || "",
-  buyer_name: p.buyerName, buyer_address: p.buyerAddress,
-  consignee_name: p.consigneeName, consignee_address: p.consigneeAddress,
-  consignee_options: p.consigneeOptions || [],
-  port_of_loading: p.portOfLoading, destination_port: p.destinationPort,
-  shipment_term: p.shipmentTerm, payment_term: p.paymentTerm, conditions: p.conditions,
-  currency: p.currency, order_no: p.buyerOrderNo || "", order_date: p.buyerOrderDate || null,
-  additional_details: p.additionalDetails || "",
-  total_boxes: p.totalBoxes || 0, total_value: num(p.totalValue), taxable_value: num(p.taxableValue),
-  tax_rate: num(p.taxRate), tax_amount: num(p.taxAmount), grand_total: num(p.grandTotal),
-  items: p.items || [],
-});
-
-const shipmentFromRow = (r) => ({
-  id: r.id, docNo: r.doc_no, taxDocNo: r.tax_doc_no, commercialDocNo: r.commercial_doc_no,
-  date: r.doc_date, piId: r.proforma_id, piNo: r.proforma_no, piDate: r.proforma_date,
-  buyerName: r.buyer_name, buyerAddress: r.buyer_address,
-  orderNo: r.order_no, orderDate: r.order_date,
-  exchangeRate: r.exchange_rate, containerNo: r.container_no, vehicleNo: r.vehicle_no,
-  customSeal: r.customs_seal, lineSeal: r.line_seal,
-  portOfLoading: r.port_of_loading, incoterm: r.incoterm,
-  gstPercent: r.gst_percent, roundOff: r.round_off, freight: r.freight,
-  otherAdj: r.other_adjustment, otherReason: r.other_reason,
-  taxInvoice: r.tax_invoice || {}, commercialInvoice: r.commercial_invoice || {},
-  packingList: r.packing_list || {}, company: r.company_snapshot || {},
-  items: r.items || [],
-});
-
-const shipmentToRow = (s) => ({
-  doc_no: s.docNo, tax_doc_no: s.taxDocNo, commercial_doc_no: s.commercialDocNo,
-  doc_date: s.date, proforma_id: s.piId, proforma_no: s.piNo, proforma_date: s.piDate,
-  buyer_name: s.buyerName, buyer_address: s.buyerAddress || "",
-  order_no: s.orderNo || "", order_date: s.orderDate || null,
-  exchange_rate: num(s.exchangeRate) || 1, container_no: s.containerNo, vehicle_no: s.vehicleNo,
-  customs_seal: s.customSeal, line_seal: s.lineSeal,
-  port_of_loading: s.portOfLoading, incoterm: s.incoterm,
-  gst_percent: num(s.gstPercent), round_off: num(s.roundOff), freight: num(s.freight),
-  other_adjustment: num(s.otherAdj), other_reason: s.otherReason || "",
-  tax_invoice: s.taxInvoice || {}, commercial_invoice: s.commercialInvoice || {},
-  packing_list: s.packingList || {}, company_snapshot: s.company || {},
-  items: s.items || [],
-});
-
-const companyFromRow = (r) => ({
-  name: r.name, address: r.address, bankName: r.bank_name, accountNo: r.account_no,
-  ifsc: r.ifsc, swift: r.swift, gstNo: r.gst_no, iecCode: r.iec_code,
-});
-
-const companyToRow = (c) => ({
-  name: c.name, address: c.address, bank_name: c.bankName, account_no: c.accountNo,
-  ifsc: c.ifsc, swift: c.swift, gst_no: c.gstNo, iec_code: c.iecCode,
-  updated_at: new Date().toISOString(),
-});
-
-const userFromRow = (r) => ({
-  id: r.id, name: r.full_name || r.email, email: r.email, role: r.role,
-  access: { documents: r.access_documents, parties: r.access_parties, company: r.access_company },
-  active: r.active, createdAt: r.created_at, lastLogin: r.last_login,
-});
-
-const auditFromRow = (r) => ({ id: r.id, at: r.at, user: r.actor, action: r.action, detail: r.detail });
-
-/* ----------------------------------------------------------- data access */
-const EMPTY_STORE = {
-  users: [],
-  company: { name: "", address: "", bankName: "", accountNo: "", ifsc: "", swift: "", gstNo: "", iecCode: "" },
-  parties: [], quotations: [], pis: [], finalInvoices: [], audit: [],
-};
-
-// One pass that rebuilds everything the screens expect. Anything this user is
-// not allowed to see comes back empty because the database filters it — the
-// interface is not what is keeping them out.
-async function fetchStore(profile) {
-  const out = JSON.parse(JSON.stringify(EMPTY_STORE));
-  const isAdmin = profile.role === "admin";
-  const canParties = isAdmin || profile.access.parties;
-  const canDocs = isAdmin || profile.access.documents;
-  const canCompany = isAdmin || profile.access.company;
-  const jobs = [];
-
-  if (canParties) {
-    jobs.push((async () => {
-      const [parties, products] = await Promise.all([
-        sb.from("parties").select("*").order("created_at", { ascending: true }),
-        sb.from("party_products").select("*"),
-      ]);
-      const byParty = {};
-      (products.data || []).forEach((p) => { (byParty[p.party_id] = byParty[p.party_id] || []).push(p); });
-      out.parties = (parties.data || []).map((r) => partyFromRow(r, byParty[r.id]));
-    })());
-  }
-
-  if (canDocs) {
-    jobs.push((async () => {
-      const { data } = await sb.from("quotations").select("*").order("created_at", { ascending: false });
-      out.quotations = (data || []).map(quotationFromRow);
-    })());
-    jobs.push((async () => {
-      const { data } = await sb.from("proformas").select("*").order("created_at", { ascending: false });
-      out.pis = (data || []).map(proformaFromRow);
-    })());
-    jobs.push((async () => {
-      const { data } = await sb.from("shipments").select("*").order("created_at", { ascending: false });
-      out.finalInvoices = (data || []).map(shipmentFromRow);
-    })());
-  }
-
-  if (canCompany) {
-    jobs.push((async () => {
-      const { data } = await sb.from("company_profile").select("*").eq("id", 1).maybeSingle();
-      if (data) out.company = companyFromRow(data);
-    })());
-  }
-
-  jobs.push((async () => {
-    const q = isAdmin
-      ? sb.from("profiles").select("*").order("created_at", { ascending: true })
-      : sb.from("profiles").select("*").eq("id", profile.id);
-    const { data } = await q;
-    out.users = (data || []).map(userFromRow);
-  })());
-
-  if (isAdmin) {
-    jobs.push((async () => {
-      const { data } = await sb.from("audit_log").select("*").order("at", { ascending: false }).limit(200);
-      out.audit = (data || []).map(auditFromRow);
-    })());
-  }
-
-  await Promise.all(jobs);
-  return out;
-}
-
-async function writeAudit(actor, action, detail) {
-  // The log must never block the work it is recording.
-  try { await sb.from("audit_log").insert({ actor, action, detail: detail || "" }); } catch (e) { /* ignore */ }
-}
-
-async function nextDocNo(seriesKey) {
-  const { data, error } = await sb.rpc("next_doc_no", { series_key: seriesKey });
-  if (error) throw new Error("Could not allocate a document number: " + error.message);
-  return data;
-}
-
 /* --------------------------------------------------------------- access */
-/* One core Admin role, plus staff accounts granted individual sections.   */
+/* One core Admin role, plus staff accounts granted individual sections.
+   These names mirror public.has_access() in the database — change both in
+   the same commit. The database is the gate; this decides what to draw.   */
 const ACCESS_KEYS = [
   { key: "documents", label: "Documents", note: "quotations, proforma invoices and shipments" },
   { key: "parties", label: "Party master", note: "buyer, consignee, product and pricing records" },
@@ -381,149 +43,94 @@ const NAV = [
   { key: "users", label: "Users", adminOnly: true },
 ];
 
-/* ------------------------------------------------------------- app ctx */
 const AppCtx = createContext(null);
 const useApp = () => useContext(AppCtx);
 
-function diffObject(before, after, keys) {
-  const out = [];
-  keys.forEach((k) => {
-    const a = before[k] === undefined || before[k] === null ? "" : String(before[k]);
-    const b = after[k] === undefined || after[k] === null ? "" : String(after[k]);
-    if (a !== b) out.push(`${k}: "${a}" → "${b}"`);
-  });
-  return out;
-}
-
-const PARTY_KEYS = ["buyerName", "buyerAddress", "consigneeName", "consigneeAddress", "country",
-  "currency", "shipmentTerm", "paymentTerm", "conditions", "portOfLoading", "destinationPort"];
-const PRODUCT_KEYS = ["name", "hsn", "rate", "mrp", "netWt", "grossWt", "packsPerBox", "weightPerPackG"];
-const COMPANY_KEYS = ["name", "address", "bankName", "accountNo", "ifsc", "swift", "gstNo", "iecCode"];
-
-function diffParty(before, after) {
-  const out = diffObject(before, after, PARTY_KEYS);
-  const oldById = {};
-  (before.products || []).forEach((p) => { oldById[p.id] = p; });
-  (after.products || []).forEach((p) => {
-    const prev = oldById[p.id];
-    if (!prev) { out.push(`product added: ${p.name || "(unnamed)"}`); return; }
-    PRODUCT_KEYS.forEach((k) => {
-      if (String(prev[k] ?? "") !== String(p[k] ?? "")) out.push(`${p.name} — ${k}: ${prev[k] ?? ""} → ${p[k] ?? ""}`);
-    });
-  });
-  const kept = new Set((after.products || []).map((p) => p.id));
-  (before.products || []).forEach((p) => { if (!kept.has(p.id)) out.push(`product removed: ${p.name}`); });
-  return out;
+// Runs a write, reports a human sentence on failure, and reloads on success.
+// Returns "" when it worked, so a form can show the message in place.
+async function attempt(work) {
+  try { await work(); return ""; }
+  catch (e) { return e && e.message ? e.message : String(e); }
 }
 
 /* --------------------------------------------------------------- login */
-function SignIn({ onSignIn, onSignUp, onReset, notice }) {
-  const [mode, setMode] = useState("in");           // in | up | forgot
-  const [fullName, setFullName] = useState("");
+function SignIn({ onSignIn, onReset }) {
+  const [mode, setMode] = useState("in");           // in | forgot
   const [emailValue, setEmailValue] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     setError(""); setSent(""); setBusy(true);
-    try {
-      if (mode === "in") {
-        const msg = await onSignIn(emailValue.trim(), password);
-        if (msg) setError(msg);
-      } else if (mode === "up") {
-        const msg = await onSignUp(emailValue.trim(), password, fullName.trim());
-        if (msg && msg.error) setError(msg.error);
-        else if (msg && msg.info) setSent(msg.info);
-      } else {
-        const msg = await onReset(emailValue.trim());
-        setSent(msg || "If that address has an account, a reset link is on its way.");
-      }
-    } catch (err) {
-      setError(err && err.message ? err.message : String(err));
+    if (mode === "in") {
+      const message = await onSignIn(emailValue.trim(), password);
+      if (message) setError(message);
+    } else {
+      setSent(await onReset(emailValue.trim()));
     }
     setBusy(false);
   };
-
-  const tab = (key, label) => (
-    <button type="button" onClick={() => { setMode(key); setError(""); setSent(""); }}
-      className={`pb-2 text-sm ${mode === key ? "border-b-2 border-[var(--accent)] text-[var(--text)]" : "text-[var(--muted)]"}`}>
-      {label}
-    </button>
-  );
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] p-6">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <p className="font-serif text-2xl tracking-tight text-[var(--text)]">Das Superfoods</p>
+          <p className="font-display text-2xl tracking-tight text-[var(--text)]">Das Superfoods</p>
           <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">Export console</p>
         </div>
 
         <form onSubmit={submit} className={card + " p-6"}>
-          <div className="mb-5 flex gap-5 border-b border-[var(--line)]">
-            {tab("in", "Sign in")}
-            {tab("up", "Create account")}
-          </div>
-
-          {mode === "up" && (
-            <Field label="Full name" className="mb-4">
-              <input className={input} value={fullName} onChange={(e) => setFullName(e.target.value)} />
-            </Field>
-          )}
+          <p className="mb-5 text-sm font-medium text-[var(--text)]">
+            {mode === "in" ? "Sign in" : "Reset your password"}
+          </p>
 
           <Field label="Work email" className="mb-4">
-            <input type="email" className={input} value={emailValue} autoComplete="username"
+            <input type="email" required className={input} value={emailValue} autoComplete="username"
               onChange={(e) => { setEmailValue(e.target.value); setError(""); }} />
           </Field>
 
-          {mode !== "forgot" && (
-            <Field label="Password" className="mb-5" hint={mode === "up" ? "At least 8 characters" : null}>
-              <input type="password" className={input} value={password}
-                autoComplete={mode === "up" ? "new-password" : "current-password"}
+          {mode === "in" && (
+            <Field label="Password" className="mb-5">
+              <input type="password" required className={input} value={password} autoComplete="current-password"
                 onChange={(e) => { setPassword(e.target.value); setError(""); }} />
             </Field>
           )}
 
-          {error && <p className={errText + " mb-4"}>{error}</p>}
-          {sent && <p className="mb-4 text-sm text-emerald-400">{sent}</p>}
-          {notice && !error && !sent && <p className="mb-4 text-xs text-[var(--muted)]">{notice}</p>}
+          <div aria-live="polite">
+            {error && <p className={errText + " mb-4"}>{error}</p>}
+            {sent && <p className="mb-4 text-sm text-[var(--status-ok)]">{sent}</p>}
+          </div>
 
           <button type="submit" disabled={busy} className={btn + " w-full"}>
-            {busy ? "Working…" : mode === "in" ? "Sign in" : mode === "up" ? "Create account" : "Send reset link"}
+            {busy ? "Working…" : mode === "in" ? "Sign in" : "Send reset link"}
           </button>
 
-          <button type="button" onClick={() => { setMode(mode === "forgot" ? "in" : "forgot"); setError(""); setSent(""); }}
+          <button type="button" onClick={() => { setMode(mode === "in" ? "forgot" : "in"); setError(""); setSent(""); }}
             className="mt-3 w-full text-xs text-[var(--muted)] hover:text-[var(--text)]">
-            {mode === "forgot" ? "Back to sign in" : "Forgotten your password?"}
+            {mode === "in" ? "Forgotten your password?" : "Back to sign in"}
           </button>
         </form>
 
         <p className="mt-5 text-center text-[11px] leading-relaxed text-[var(--faint)]">
-          New accounts start with no access to any section. An administrator grants them under Users &amp; access.
+          Accounts are created by an administrator. If you need access, ask them to add you under Users.
         </p>
       </div>
     </div>
   );
 }
 
-function NoAccess({ profile, onSignOut }) {
+function Splash({ children }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] p-6">
-      <div className={card + " w-full max-w-md p-6 text-center"}>
-        <Lock className="mx-auto mb-3 h-6 w-6 text-[var(--muted)]" />
-        <p className="font-serif text-xl">Waiting for access</p>
-        <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">
-          Your account <span className="text-[var(--text)]">{profile.email}</span> is created, but no sections have been
-          granted to it yet. An administrator needs to tick your permissions under Users &amp; access.
-        </p>
-        <button onClick={onSignOut} className={btnGhost + " mt-5"}>Sign out</button>
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] p-6 text-center text-sm text-[var(--muted)]">
+      {children}
     </div>
   );
 }
+
+/* ------------------------------------------------------- command palette */
 function CommandPalette({ open, onClose, onNavigate, sections }) {
   const { store } = useApp();
   const [q, setQ] = useState("");
@@ -545,8 +152,8 @@ function CommandPalette({ open, onClose, onNavigate, sections }) {
   const pick = (r) => { onNavigate(r.go); onClose(); };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6 pt-24" onMouseDown={(e) => { if (e.target === boxRef.current) onClose(); }} ref={boxRef}>
-      <div className={card + " w-full max-w-lg overflow-hidden"} onMouseDown={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--scrim)] p-6 pt-24" onMouseDown={(e) => { if (e.target === boxRef.current) onClose(); }} ref={boxRef}>
+      <div className={card + " w-full max-w-lg overflow-hidden"} role="dialog" aria-modal="true" aria-label="Search" onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 border-b border-[var(--line)] px-4">
           <Search className="h-4 w-4 text-[var(--muted)]" />
           <input
@@ -556,7 +163,7 @@ function CommandPalette({ open, onClose, onNavigate, sections }) {
               if (e.key === "Escape") onClose();
               if (e.key === "Enter" && results.length) pick(results[0]);
             }}
-            className="w-full bg-transparent py-3.5 text-sm text-[var(--text)] placeholder:text-[var(--faint)] focus:outline-none"
+            className="w-full bg-transparent py-3.5 text-sm text-[var(--text)] placeholder:text-[var(--faint)]"
           />
           <kbd className="rounded border border-[var(--line)] px-1.5 py-0.5 text-[10px] text-[var(--muted)]">esc</kbd>
         </div>
@@ -575,149 +182,229 @@ function CommandPalette({ open, onClose, onNavigate, sections }) {
   );
 }
 
+
+/* ------------------------------------------------------- own password */
+function ChangePasswordDialog({ onClose, onChanged }) {
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (pw1.length < 8) return setError("Use at least 8 characters.");
+    if (pw1 !== pw2) return setError("The two passwords do not match.");
+    setBusy(true); setError("");
+    const message = await attempt(async () => {
+      const { error: authError } = await withTimeout(sb.auth.updateUser({ password: pw1 }));
+      if (authError) throw new Error(authError.message);
+      await call("log_session_event", { p_event: "Password changed" });
+    });
+    setBusy(false);
+    if (message) return setError(message);
+    onChanged();
+  };
+
+  return (
+    <Dialog title="Change your password" onClose={onClose}>
+      <form onSubmit={submit}>
+        <Field label="New password" className="mb-4" hint="At least 8 characters. Only you will know it.">
+          <input type="password" className={input} value={pw1} autoComplete="new-password"
+            onChange={(e) => { setPw1(e.target.value); setError(""); }} />
+        </Field>
+        <Field label="Confirm new password" className="mb-5">
+          <input type="password" className={input} value={pw2} autoComplete="new-password"
+            onChange={(e) => { setPw2(e.target.value); setError(""); }} />
+        </Field>
+        <div aria-live="polite">{error && <p className={errText + " mb-4"}>{error}</p>}</div>
+        <div className="flex justify-end gap-3">
+          <button type="button" onClick={onClose} className={btnGhost}>Cancel</button>
+          <button type="submit" disabled={busy} className={btn}>{busy ? "Saving…" : "Save password"}</button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
 /* ------------------------------------------------------------------ app */
 function App() {
   const [session, setSession] = useState(undefined);   // undefined = still checking
-  const [profile, setProfile] = useState(null);
-  const [store, setStore] = useState(EMPTY_STORE);
+  const [profile, setProfile] = useState(undefined);   // undefined = not loaded yet
+  const [profileError, setProfileError] = useState("");
+  const [store, setStore] = useState(emptyStore);
+  const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState("overview");
   const [theme, setTheme] = useState(() => { try { return window.localStorage.getItem(THEME_KEY) || "dark"; } catch (e) { return "dark"; } });
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [toast, setToast] = useState("");
 
   /* --- theme ------------------------------------------------------- */
   useEffect(() => {
-    document.documentElement.classList.toggle("light", theme === "light");
+    if (theme === "light") document.documentElement.dataset.theme = "light";
+    else delete document.documentElement.dataset.theme;
     try { window.localStorage.setItem(THEME_KEY, theme); } catch (e) { /* not fatal */ }
   }, [theme]);
 
-  /* --- auth session ------------------------------------------------ */
+  /* --- ⌘K ---------------------------------------------------------- */
   useEffect(() => {
-    sb.auth.getSession().then(({ data }) => setSession(data.session || null));
-    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => setSession(s));
-    return () => sub.subscription.unsubscribe();
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /* --- profile for the signed-in user ------------------------------ */
+  /* --- session ----------------------------------------------------- */
   useEffect(() => {
-    if (!session) { setProfile(null); setStore(EMPTY_STORE); return; }
-    let cancelled = false;
-    (async () => {
-      const { data } = await sb.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
-      if (cancelled) return;
-      setProfile(data ? userFromRow(data) : null);
-    })();
-    return () => { cancelled = true; };
-  }, [session]);
+    let settled = false;
+    // A stale session must never leave the app on a spinner: after the
+    // boot timeout we fall through to the sign-in screen, non-destructively.
+    const guard = setTimeout(() => { if (!settled) setSession(null); }, BOOT_TIMEOUT_MS);
+    sb.auth.getSession().then(({ data }) => { settled = true; setSession(data.session || null); });
+    const { data: sub } = sb.auth.onAuthStateChange((_event, next) => { settled = true; setSession(next); });
+    return () => { clearTimeout(guard); sub.subscription.unsubscribe(); };
+  }, []);
 
-  /* --- the data itself, plus live updates -------------------------- */
-  const refresh = React.useCallback(async () => {
-    if (!profile) return;
+  const userId = session ? session.user.id : null;
+
+  /* --- profile ----------------------------------------------------- */
+  const loadProfile = useCallback(async () => {
+    if (!userId) { setProfile(undefined); return; }
+    setProfileError("");
+    try {
+      const { data, error } = await withTimeout(sb.from("profiles").select("*").eq("id", userId).maybeSingle());
+      if (error) throw new Error(humanise(error));
+      setProfile(data ? userFromRow(data) : null);
+    } catch (e) {
+      setProfileError(e.message || String(e));
+    }
+  }, [userId]);
+
+  useEffect(() => { loadProfile(); }, [loadProfile]);
+
+  /* --- data -------------------------------------------------------- */
+  const refresh = useCallback(async () => {
+    if (!profile || !profile.active) return;
     setLoading(true);
-    try { setStore(await fetchStore(profile)); }
-    catch (e) { setNotice("Could not load data: " + (e.message || e)); }
+    try {
+      setStore(await fetchStore(profile));
+      setLoadError("");
+    } catch (e) {
+      // Nothing degraded is kept on screen: the pages give way to an error.
+      setLoadError(e.message || String(e));
+    }
     setLoading(false);
   }, [profile]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  /* --- live updates ------------------------------------------------ */
   useEffect(() => {
-    if (!profile) return;
-    // Anything anyone changes lands here, so two people working at once stay
-    // in step without reloading. RLS still applies to what each client gets.
+    if (!profile || !profile.active) return undefined;
+    // Whatever anyone changes arrives here, so two people working at once stay
+    // in step. A burst of events becomes one reload.
+    let timer;
+    const soon = (table) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (table === "profiles") loadProfile(); else refresh(); }, 250);
+    };
     const channel = sb.channel("console-changes");
-    ["parties", "party_products", "quotations", "proformas", "shipments", "company_profile", "profiles", "audit_log"]
-      .forEach((table) => channel.on("postgres_changes", { event: "*", schema: "public", table }, () => refresh()));
+    for (const table of ["parties", "party_products", "quotations", "proformas", "shipments", "company_profile", "profiles", "audit_log"]) {
+      channel.on("postgres_changes", { event: "*", schema: "public", table }, () => soon(table));
+    }
     channel.subscribe();
-    return () => { sb.removeChannel(channel); };
-  }, [profile, refresh]);
+    return () => { clearTimeout(timer); sb.removeChannel(channel); };
+  }, [profile, refresh, loadProfile]);
 
   /* --- auth actions ------------------------------------------------ */
   const signIn = async (email, password) => {
-    const { error } = await sb.auth.signInWithPassword({ email, password });
-    if (error) {
-      writeAudit(email, "Sign-in failed", error.message);
-      return error.message === "Invalid login credentials"
-        ? "That email and password do not match an account."
-        : error.message;
+    let result;
+    try { result = await withTimeout(sb.auth.signInWithPassword({ email, password })); }
+    catch (e) { return e.message || "Could not reach the server."; }
+    if (result.error) {
+      const m = result.error.message || "";
+      // The same sentence for a wrong password and an unknown address.
+      if (/invalid login credentials/i.test(m)) return "Incorrect email or password.";
+      if (/not confirmed/i.test(m)) return "This email address has not been confirmed yet.";
+      if (/rate limit|too many/i.test(m)) return "Too many attempts. Wait a few minutes and try again.";
+      return "Could not sign in. Try again in a moment.";
     }
-    writeAudit(email, "Signed in", "");
-    await sb.from("profiles").update({ last_login: new Date().toISOString() }).eq("email", email);
+    await attempt(() => call("log_session_event", { p_event: "Signed in" }));
     setActive("overview");
     return "";
   };
 
-  const signUp = async (email, password, fullName) => {
-    if (password.length < 8) return { error: "Use at least 8 characters." };
-    const { data, error } = await sb.auth.signUp({
-      email, password, options: { data: { full_name: fullName || email } },
-    });
-    if (error) return { error: error.message };
-    if (data.session) { writeAudit(email, "Account created", fullName); return {}; }
-    return { info: "Account created. Check your email for the confirmation link, then sign in." };
-  };
-
   const resetPassword = async (email) => {
-    await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    await attempt(() => withTimeout(sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })));
     return "If that address has an account, a reset link is on its way.";
   };
 
   const signOut = async () => {
-    if (profile) writeAudit(profile.email, "Signed out", "");
+    await attempt(() => call("log_session_event", { p_event: "Signed out" }));
     await sb.auth.signOut();
-  };
-
-  const audit = (action, detail) => {
-    writeAudit(profile ? profile.email : "—", action, detail);
-  };
-
-  const can = (needs) => {
-    if (!profile) return false;
-    if (profile.role === "admin") return true;
-    if (!needs) return true;
-    return Boolean((profile.access || {})[needs]);
+    setStore(emptyStore());
   };
 
   /* --- gates ------------------------------------------------------- */
-  if (session === undefined) {
-    return <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--muted)]">Connecting…</div>;
+  if (session === undefined) return <Splash>Connecting…</Splash>;
+  if (!session) return <SignIn onSignIn={signIn} onReset={resetPassword} />;
+  if (profileError) {
+    return <Splash><div className="max-w-md"><ErrorPanel message={profileError} onRetry={loadProfile} /></div></Splash>;
   }
-  if (!session) {
-    return <SignIn onSignIn={signIn} onSignUp={signUp} onReset={resetPassword} notice={notice} />;
-  }
-  if (!profile) {
-    return <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--muted)]">Loading your profile…</div>;
-  }
-  if (!profile.active) {
-    return <NoAccess profile={{ email: profile.email + " (deactivated)" }} onSignOut={signOut} />;
-  }
-  if (profile.role !== "admin" && !profile.access.documents && !profile.access.parties && !profile.access.company) {
-    return <NoAccess profile={profile} onSignOut={signOut} />;
+  if (profile === undefined) return <Splash>Loading your profile…</Splash>;
+
+  const can = accessOf(profile);
+  if (!profile || !profile.active || !(can.isAdmin || can.documents || can.parties || can.company)) {
+    return (
+      <Splash>
+        <div className={card + " w-full max-w-md p-6"}>
+          <Lock className="mx-auto mb-3 h-6 w-6 text-[var(--muted)]" />
+          <p className="font-display text-xl text-[var(--text)]">
+            {profile && !profile.active ? "This account is deactivated" : "Waiting for access"}
+          </p>
+          <p className="mt-2 text-sm leading-relaxed">
+            {profile && !profile.active
+              ? "An administrator has switched this account off. Nothing you created has been removed."
+              : <span>Your account <span className="text-[var(--text)]">{session.user.email}</span> exists, but no sections have been granted to it yet. Ask an administrator to tick your permissions under Users.</span>}
+          </p>
+          <button onClick={signOut} className={btnGhost + " mt-5"}>Sign out</button>
+        </div>
+      </Splash>
+    );
   }
 
   const user = profile;
-  const sections = NAV.filter((n) => (n.adminOnly ? user.role === "admin" : can(n.needs)));
+  const allowed = (needs) => !needs || can.isAdmin || Boolean(can[needs]);
+  const sections = NAV.filter((n) => (n.adminOnly ? can.isAdmin : allowed(n.needs)));
   const current = sections.find((s) => s.key === active) || sections[0];
-  const ctx = { store, refresh, user, can, audit, loading };
+  const drift = can.isAdmin && !loadError ? computeMigrationDrift(store.migrationIds) : { inSync: true };
+  const ctx = { store, refresh, user, can: allowed, isAdmin: can.isAdmin, loading };
 
   return (
     <AppCtx.Provider value={ctx}>
+      <a href="#main" className="skip-link">Skip to content</a>
       <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
         <header className="border-b border-[var(--line)]">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-6 pt-5">
-            <div className="flex items-baseline gap-3">
-              <span className="font-serif text-xl font-semibold tracking-tight">Das Superfoods</span>
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-6 pt-5">
+            <div className="flex items-baseline gap-3 whitespace-nowrap">
+              <span className="font-display text-xl font-semibold tracking-tight">Das Superfoods</span>
               <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">Export console</span>
             </div>
             <div className="flex items-center gap-2">
-              {loading && <span className="text-xs text-[var(--muted)]">syncing…</span>}
+              <span aria-live="polite" className="text-xs text-[var(--muted)]">{loading ? "syncing…" : toast}</span>
               <button onClick={() => setPaletteOpen(true)} className="flex items-center gap-6 rounded-lg border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)]">
                 Search <kbd className="text-xs">⌘K</kbd>
               </button>
-              <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title="Switch theme"
+              <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                aria-label={theme === "dark" ? "Switch to the light theme" : "Switch to the dark theme"}
                 className="rounded-lg border border-[var(--line)] p-2 text-[var(--muted)] hover:text-[var(--text)]">
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
+              <button onClick={() => setPasswordOpen(true)} aria-label="Change your password" title="Change your password"
+                className="rounded-lg border border-[var(--line)] p-2 text-[var(--muted)] hover:text-[var(--text)]">
+                <KeyRound className="h-4 w-4" />
               </button>
               <span className="px-2 text-sm text-[var(--muted)]">
                 {user.name.split(" ")[0]} · <span className="text-[var(--text)]">{user.role}</span>
@@ -725,9 +412,10 @@ function App() {
               <button onClick={signOut} className={btnGhost}>Sign out</button>
             </div>
           </div>
-          <nav className="mx-auto flex max-w-7xl gap-7 px-6">
+          <nav aria-label="Sections" className="mx-auto flex max-w-7xl gap-7 overflow-x-auto whitespace-nowrap px-6">
             {sections.map((s) => (
               <button key={s.key} onClick={() => setActive(s.key)}
+                aria-current={current && current.key === s.key ? "page" : undefined}
                 className={`border-b-2 py-4 text-sm transition-colors ${
                   current && current.key === s.key
                     ? "border-[var(--accent)] font-medium text-[var(--text)]"
@@ -739,33 +427,44 @@ function App() {
           </nav>
         </header>
 
-        <main className="mx-auto max-w-7xl px-6 py-10">
-          {notice && (
-            <div className="mb-8 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-400">
+        <main id="main" className="mx-auto max-w-7xl px-6 py-10">
+          {!drift.inSync && (
+            <div role="alert" className="mb-8 flex items-start gap-2 rounded-lg border border-[var(--status-warn)]/40 bg-[var(--status-warn)]/10 px-4 py-3 text-xs text-[var(--status-warn)]">
               <TriangleAlert className="mt-px h-4 w-4 shrink-0" />
-              <span>{notice}</span>
+              <span><span className="font-medium">Database and console are out of step.</span> {describeDrift(drift)}</span>
             </div>
           )}
-          {current && current.key === "overview" && <Overview onNavigate={setActive} />}
-          {current && current.key === "parties" && <PartiesPage />}
-          {current && current.key === "quotations" && <QuotationsPage />}
-          {current && current.key === "proforma" && <ProformaPage />}
-          {current && current.key === "shipments" && <ShipmentsPage />}
-          {current && current.key === "analytics" && <AnalyticsPage />}
-          {current && current.key === "company" && <CompanyPage />}
-          {current && current.key === "users" && <UsersPage />}
+
+          {loadError ? <ErrorPanel message={loadError} onRetry={refresh} /> : (
+            <React.Fragment>
+              {current && current.key === "overview" && <Overview onNavigate={setActive} />}
+              {current && current.key === "parties" && <PartiesPage />}
+              {current && current.key === "quotations" && <QuotationsPage />}
+              {current && current.key === "proforma" && <ProformaPage />}
+              {current && current.key === "shipments" && <ShipmentsPage />}
+              {current && current.key === "analytics" && <AnalyticsPage />}
+              {current && current.key === "company" && <CompanyPage />}
+              {current && current.key === "users" && <UsersPage />}
+            </React.Fragment>
+          )}
         </main>
 
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={setActive} sections={sections} />
+        {passwordOpen && (
+          <ChangePasswordDialog onClose={() => setPasswordOpen(false)}
+            onChanged={() => { setPasswordOpen(false); setToast("Password changed"); setTimeout(() => setToast(""), 4000); }} />
+        )}
       </div>
     </AppCtx.Provider>
   );
 }
+
+/* ------------------------------------------------------------- overview */
 /* ------------------------------------------------------------- overview */
 function Stat({ label: text, value, hint }) {
   return (
     <div className={card + " p-5"}>
-      <p className="font-serif text-3xl text-[var(--text)]">{value}</p>
+      <p className="font-display text-3xl text-[var(--text)]">{value}</p>
       <p className="mt-1 text-sm text-[var(--text)]">{text}</p>
       {hint && <p className="mt-0.5 text-xs text-[var(--muted)]">{hint}</p>}
     </div>
@@ -792,7 +491,7 @@ function Overview({ onNavigate }) {
       {can("documents") && openPis.length > 0 && (
         <div className={card + " overflow-hidden"}>
           <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4">
-            <p className="font-serif text-lg">Awaiting shipment</p>
+            <p className="font-display text-lg">Awaiting shipment</p>
             <button onClick={() => onNavigate("shipments")} className="flex items-center gap-1 text-sm text-[var(--accent)]">
               Go to shipments <ChevronRight className="h-3.5 w-3.5" />
             </button>
@@ -804,7 +503,7 @@ function Overview({ onNavigate }) {
             <tbody>
               {openPis.map((pi) => (
                 <tr key={pi.id} className="border-t border-[var(--line)]">
-                  <td className={td + " font-mono text-xs"}>{pi.docNo}</td>
+                  <td className={td + " font-num text-xs"}>{pi.docNo}</td>
                   <td className={td}>{pi.buyerName}</td>
                   <td className={td}>{fmtMoney(pi.grandTotal ?? pi.totalValue, pi.currency)}</td>
                 </tr>
@@ -816,7 +515,7 @@ function Overview({ onNavigate }) {
 
       {user.role === "admin" && store.audit.length > 0 && (
         <div className={card + " mt-6 p-5"}>
-          <p className="mb-4 font-serif text-lg">Recent activity</p>
+          <p className="mb-4 font-display text-lg">Recent activity</p>
           <ul className="space-y-2">
             {store.audit.slice(0, 6).map((a) => (
               <li key={a.id} className="flex gap-4 text-sm">
@@ -832,10 +531,11 @@ function Overview({ onNavigate }) {
   );
 }
 
+
 /* --------------------------------------------------------------- parties */
 function ProductRows({ products, setProducts, mode }) {
   const update = (id, field, val) => setProducts(products.map((p) => (p.id === id ? { ...p, [field]: val } : p)));
-  const add = () => setProducts([...products, { id: uid(), name: "", hsn: "", rate: 0, mrp: 0, netWt: 0, grossWt: 0, packsPerBox: 1, weightPerPackG: 0 }]);
+  const add = () => setProducts([...products, { id: tempId(), name: "", hsn: "", rate: 0, mrp: 0, netWt: 0, grossWt: 0, packsPerBox: 1, weightPerPackG: 0 }]);
   return (
     <div className={panel + " overflow-x-auto"}>
       <table className="w-full">
@@ -862,7 +562,7 @@ function ProductRows({ products, setProducts, mode }) {
               <td className="px-2 py-1.5"><input type="number" className={input} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} /></td>
               <td className="px-2 py-1.5"><input type="number" className={input} value={p.weightPerPackG} onChange={(e) => update(p.id, "weightPerPackG", e.target.value)} /></td>
               <td className="px-2">
-                <button onClick={() => setProducts(products.filter((x) => x.id !== p.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--danger)]" /></button>
+                <button onClick={() => setProducts(products.filter((x) => x.id !== p.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" /></button>
               </td>
             </tr>
           ))}
@@ -890,7 +590,7 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
     <div className={card + " mb-6 p-6"}>
       <div className="mb-5 flex items-start justify-between">
         <div>
-          <p className="font-serif text-lg">{isEdit ? "Edit" : "New"} {tab === "international" ? "international" : "private-label"} party</p>
+          <p className="font-display text-lg">{isEdit ? "Edit" : "New"} {tab === "international" ? "international" : "private-label"} party</p>
           <p className="mt-1 text-xs text-[var(--muted)]">
             Editing later only affects future documents — anything already issued keeps the values it was created with. Changes land in the audit log.
           </p>
@@ -925,7 +625,7 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
         <button
           onClick={() => {
             const consigneeOptions = Array.from(new Set([...(f.consigneeOptions || []), f.consigneeName].filter(Boolean)));
-            onSave(isEdit ? { ...f, products, consigneeOptions } : { id: uid(), ...f, products, consigneeOptions });
+            onSave(isEdit ? { ...f, products, consigneeOptions } : { id: tempId(), ...f, products, consigneeOptions });
           }}
           className={btn}
         >
@@ -936,8 +636,9 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
   );
 }
 
+
 function PartiesPage() {
-  const { store, refresh, audit } = useApp();
+  const { store, refresh } = useApp();
   const [tab, setTab] = useState("international");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -947,44 +648,47 @@ function PartiesPage() {
   const filtered = store.parties.filter((p) => p.type === tab);
   const editing = store.parties.find((p) => p.id === editingId);
 
-  // A party and its product lines are saved together: write the party, then
-  // replace its product rows outright. Simpler than diffing, and the list is
-  // always short.
-  const saveParty = async (p, isEdit) => {
-    setSaveError("");
-    try {
-      let partyId = p.id;
-      if (isEdit) {
-        const { error } = await sb.from("parties").update(partyToRow(p)).eq("id", partyId);
-        if (error) throw error;
-        const del = await sb.from("party_products").delete().eq("party_id", partyId);
-        if (del.error) throw del.error;
-      } else {
-        const { data, error } = await sb.from("parties").insert(partyToRow(p)).select("id").single();
-        if (error) throw error;
-        partyId = data.id;
-      }
-      const rows = (p.products || []).filter((x) => x.name).map((x) => productToRow(partyId, x));
-      if (rows.length) {
-        const { error } = await sb.from("party_products").insert(rows);
-        if (error) throw error;
-      }
+  // One call: the party and its product lines are saved in a single transaction.
+  const saveParty = async (p) => {
+    const products = (p.products || [])
+      .filter((x) => String(x.name || "").trim() !== "")
+      .map((x) => pick(x, PARTY_PRODUCT_KEYS));
+    const message = await attempt(async () => {
+      await call("save_party", { p: { ...pick(p, PARTY_KEYS), products } });
       await refresh();
-      return true;
-    } catch (e) {
-      setSaveError(e.message || String(e));
-      return false;
-    }
+    });
+    setSaveError(message);
+    return message === "";
   };
 
   const deleteParty = async (p) => {
-    setSaveError("");
-    const { error } = await sb.from("parties").delete().eq("id", p.id);
-    if (error) { setSaveError(error.message); return; }
-    audit("Party deleted", p.buyerName);
-    setConfirmId(null);
-    await refresh();
+    const message = await attempt(async () => {
+      await call("delete_party", { p_id: p.id });
+      await refresh();
+    });
+    setSaveError(message);
+    if (!message) setConfirmId(null);
   };
+
+  // The price list, one row per product — the shape that is useful in Excel.
+  const priceList = store.parties.flatMap((p) => (p.products.length ? p.products : [null]).map((prod) => ({ p, prod })));
+  const excelColumns = [
+    { label: "Buyer", value: (r) => r.p.buyerName, width: 32 },
+    { label: "Type", value: (r) => r.p.type },
+    { label: "Country", value: (r) => r.p.country },
+    { label: "Currency", value: (r) => r.p.currency, width: 10 },
+    { label: "Shipment term", value: (r) => r.p.shipmentTerm },
+    { label: "Payment term", value: (r) => r.p.paymentTerm, width: 30 },
+    { label: "Port of loading", value: (r) => r.p.portOfLoading },
+    { label: "Destination port", value: (r) => r.p.destinationPort },
+    { label: "Product", value: (r) => (r.prod ? r.prod.name : ""), width: 30 },
+    { label: "HSN", value: (r) => (r.prod ? r.prod.hsn : "") },
+    { label: "Rate / box", value: (r) => (r.prod ? r.prod.rate : "") },
+    { label: "MRP / box", value: (r) => (r.prod ? r.prod.mrp : "") },
+    { label: "Units / box", value: (r) => (r.prod ? r.prod.packsPerBox : "") },
+    { label: "Net kg / box", value: (r) => (r.prod ? r.prod.netWt : "") },
+    { label: "Gross kg / box", value: (r) => (r.prod ? r.prod.grossWt : "") },
+  ];
 
   return (
     <div>
@@ -993,30 +697,26 @@ function PartiesPage() {
       <div className="mb-5 flex items-center justify-between">
         <div className="flex gap-1 rounded-lg border border-[var(--line)] p-1">
           {[["international", "International"], ["domestic", "Private label / India"]].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)}
+            <button key={k} onClick={() => setTab(k)} aria-pressed={tab === k}
               className={`rounded-md px-3 py-1.5 text-sm ${tab === k ? "bg-[var(--field)] text-[var(--text)]" : "text-[var(--muted)]"}`}>{l}</button>
           ))}
         </div>
-        <button onClick={() => { setEditingId(null); setShowForm(true); }} className={btn + " flex items-center gap-1.5"}>
-          <Plus className="h-4 w-4" /> Add party
-        </button>
+        <div className="flex items-center gap-3">
+          <ExcelButton name="party-price-list" columns={excelColumns} rows={priceList} />
+          <button onClick={() => { setEditingId(null); setShowForm(true); }} className={btn + " flex items-center gap-1.5"}>
+            <Plus className="h-4 w-4" /> Add party
+          </button>
+        </div>
       </div>
 
-      {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
+      <div aria-live="polite">{saveError && <p className={errText + " mb-4"}>{saveError}</p>}</div>
 
       {showForm && <PartyForm tab={tab} onCancel={() => setShowForm(false)} onSave={async (p) => {
-        if (await saveParty(p, false)) {
-          audit("Party created", `${p.buyerName} (${p.type})`);
-          setShowForm(false);
-        }
+        if (await saveParty(p)) setShowForm(false);
       }} />}
 
       {editing && <PartyForm tab={editing.type} initial={editing} onCancel={() => setEditingId(null)} onSave={async (u) => {
-        const changes = diffParty(editing, u);
-        if (await saveParty(u, true)) {
-          audit("Party edited", `${u.buyerName} — ${changes.length ? changes.join("; ") : "no field changes"}`);
-          setEditingId(null);
-        }
+        if (await saveParty(u)) setEditingId(null);
       }} />}
 
       <div className={card + " overflow-hidden"}>
@@ -1033,181 +733,378 @@ function PartiesPage() {
                 <td className={td + " font-medium"}>{p.buyerName}</td>
                 <td className={td + " text-[var(--muted)]"}>{p.country}</td>
                 <td className={td}>{p.currency}</td>
-                <td className={td}>{p.products.length}</td>
+                <td className={td + " font-num tabular-nums"}>{p.products.length}</td>
                 <td className={td + " text-[var(--muted)]"}>{p.paymentTerm}</td>
                 <td className={td + " text-right"}>
                   {confirmId === p.id ? (
                     <span className="flex items-center justify-end gap-3">
-                      <span className="text-xs text-[var(--danger)]">Delete?</span>
-                      <button onClick={() => deleteParty(p)} className="text-xs text-[var(--danger)]">Confirm</button>
+                      <span className="text-xs text-[var(--status-danger)]">Retire {p.buyerName}?</span>
+                      <button onClick={() => deleteParty(p)} className="text-xs text-[var(--status-danger)]">Confirm</button>
                       <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--muted)]">Cancel</button>
                     </span>
                   ) : (
                     <span className="flex items-center justify-end gap-4">
                       <button onClick={() => { setShowForm(false); setEditingId(p.id); }} className="text-xs text-[var(--accent)]">Edit</button>
-                      <button onClick={() => setConfirmId(p.id)} className="text-xs text-[var(--muted)] hover:text-[var(--danger)]">Delete</button>
+                      <button onClick={() => setConfirmId(p.id)} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Delete</button>
                     </span>
                   )}
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--muted)]">No parties in this category yet.</td></tr>}
+            {filtered.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                No parties in this category yet — use “Add party” to create the first one.
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
+      <p className="mt-3 text-xs text-[var(--faint)]">
+        Deleting retires a party from the lists; the record and its history stay in the database, and documents already issued are unaffected.
+      </p>
     </div>
   );
 }
 
 /* -------------------------------------------------------- quotations */
-function QuotationsPage() {
-  const { store, refresh, audit } = useApp();
-  const [open, setOpen] = useState(false);
+/* A printable document is rendered into a portal on <body>; the print rules in
+   tokens.css hide the console around it, and the browser's "Save as PDF"
+   destination produces the file.                                          */
+function PrintDocument({ children }) {
+  return createPortal(<div id="print-portal">{children}</div>, document.body);
+}
+
+function QuotationDocument({ q, company }) {
+  const isDomestic = (q.country || "").trim().toLowerCase() === "india";
+  return (
+    <div className="doc">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <p style={{ fontSize: 18, fontWeight: "bold", margin: 0 }}>{company.name || "Das Superfoods"}</p>
+          <p className="muted" style={{ margin: "2px 0 0", maxWidth: 320 }}>{company.address}</p>
+          <p className="muted" style={{ margin: "2px 0 0" }}>
+            {company.gstNo ? `GST ${company.gstNo}` : ""}{company.gstNo && company.iecCode ? " · " : ""}
+            {company.iecCode ? `IEC ${company.iecCode}` : ""}
+          </p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <h1>Quotation</h1>
+          <p style={{ margin: "6px 0 0" }}><b>{q.docNo}</b></p>
+          <p className="muted" style={{ margin: 0 }}>Date: {fmtDate(q.date)}</p>
+        </div>
+      </div>
+      <div className="rule" />
+
+      <div style={{ display: "flex", gap: 32 }}>
+        <div style={{ flex: 1 }}>
+          <p className="muted" style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>Quotation to</p>
+          <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{q.buyerName}</p>
+          <p className="muted" style={{ margin: 0 }}>{q.buyerAddress}</p>
+          <p className="muted" style={{ margin: 0 }}>{q.country}</p>
+        </div>
+        <div style={{ flex: 1 }}>
+          <p className="muted" style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>Terms</p>
+          <p style={{ margin: "3px 0 0" }}>Shipment: {q.shipmentTerm || "—"}</p>
+          <p style={{ margin: 0 }}>Payment: {q.paymentTerm || "—"}</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: 28 }}>#</th>
+            <th>Product</th>
+            <th style={{ width: 90 }}>HSN</th>
+            <th className="num" style={{ width: 70 }}>Boxes</th>
+            <th className="num" style={{ width: 90 }}>Rate / box</th>
+            <th className="num" style={{ width: 100 }}>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(q.items || []).map((it, i) => (
+            <tr key={it.id || i}>
+              <td>{i + 1}</td>
+              <td>{it.product}</td>
+              <td>{it.hsn}</td>
+              <td className="num">{it.boxQty}</td>
+              <td className="num">{fmtNum(it.boxRate)}</td>
+              <td className="num">{fmtNum(Number(it.boxQty) * Number(it.boxRate))}</td>
+            </tr>
+          ))}
+          <tr>
+            <td colSpan={5} className="num"><b>Total</b></td>
+            <td className="num"><b>{fmtNum(q.totalValue)}</b></td>
+          </tr>
+          {isDomestic && Number(q.igstAmt) > 0 && (
+            <tr>
+              <td colSpan={5} className="num">IGST @ {fmtNum(q.igstRate, 2)}%</td>
+              <td className="num">{fmtNum(q.igstAmt)}</td>
+            </tr>
+          )}
+          <tr>
+            <td colSpan={5} className="num"><b>Grand total</b></td>
+            <td className="num"><b>{fmtNum(q.grandTotal)}</b></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p style={{ marginTop: 8, fontStyle: "italic" }}>Amount in words: {amountInWords(q.grandTotal)}</p>
+
+      <p className="muted" style={{ marginTop: 18, fontSize: 11 }}>
+        This quotation is valid for 30 days from the date above. Prices are quoted on {q.shipmentTerm || "the agreed"} terms and
+        are subject to confirmation of availability at the time of order.
+        {!isDomestic && " IGST is not applicable on export supplies."}
+      </p>
+
+      <div style={{ marginTop: 48, textAlign: "right" }}>
+        <p style={{ margin: 0 }}>For <b>{company.name || "Das Superfoods"}</b></p>
+        <p className="muted" style={{ margin: "44px 0 0" }}>Authorised signatory</p>
+      </div>
+    </div>
+  );
+}
+
+function QuotationForm({ initial, onCancel, onSubmit }) {
+  const { store } = useApp();
+  const isEdit = Boolean(initial);
+  const [partyId, setPartyId] = useState(initial ? initial.partyId || "" : "");
+  const [buyerName, setBuyerName] = useState(initial ? initial.buyerName : "");
+  const [buyerAddress, setBuyerAddress] = useState(initial ? initial.buyerAddress || "" : "");
+  const [country, setCountry] = useState(initial ? initial.country : "");
+  const [shipmentTerm, setShipmentTerm] = useState(initial ? initial.shipmentTerm || "FOB" : "FOB");
+  const [paymentTerm, setPaymentTerm] = useState(initial ? initial.paymentTerm || "" : "");
+  const [igst, setIgst] = useState(initial ? Boolean(initial.igst) : false);
+  const [igstRate, setIgstRate] = useState(initial ? initial.igstRate : 0);
+  const [items, setItems] = useState(initial && initial.items && initial.items.length
+    ? initial.items.map((i) => ({ ...i, id: i.id || tempId() }))
+    : [{ id: tempId(), product: "", hsn: "", boxQty: 0, boxRate: 0 }]);
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [partyId, setPartyId] = useState("");
-  const [buyerName, setBuyerName] = useState("");
-  const [country, setCountry] = useState("");
-  const [shipmentTerm, setShipmentTerm] = useState("FOB");
-  const [paymentTerm, setPaymentTerm] = useState("");
-  const [igst, setIgst] = useState(false);
-  const [igstRate, setIgstRate] = useState(0);
-  const [items, setItems] = useState([{ id: uid(), product: "", hsn: "", boxQty: 0, boxRate: 0 }]);
-  const [error, setError] = useState("");
-
-  const isDomestic = country.trim().toLowerCase() === "india";
-  const total = items.reduce((s, i) => s + Number(i.boxQty) * Number(i.boxRate), 0);
-  const igstAmt = isDomestic && igst ? (total * Number(igstRate)) / 100 : 0;
-  const grand = total + igstAmt;
+  const totals = quotationTotals({ items, country, igst, igstRate });
+  const isDomestic = totals.domestic;
+  const total = totals.total, igstAmt = totals.tax, grand = totals.grand;
   const updateItem = (id, k, v) => setItems(items.map((i) => (i.id === id ? { ...i, [k]: v } : i)));
 
-  const reset = () => {
-    setPartyId(""); setBuyerName(""); setCountry(""); setShipmentTerm("FOB"); setPaymentTerm("");
-    setIgst(false); setIgstRate(0); setItems([{ id: uid(), product: "", hsn: "", boxQty: 0, boxRate: 0 }]); setError("");
-  };
-
-  const create = async () => {
+  const submit = async () => {
     if (!buyerName.trim()) return setError("Buyer name is required.");
     setBusy(true); setError("");
-    try {
-      // The number comes from the database so two people cannot take the same one.
-      const docNo = await nextDocNo("quotation");
-      const rec = {
-        docNo, date: todayISO(), partyId, buyerName, country, shipmentTerm, paymentTerm,
-        items, igst, igstRate, totalValue: total, igstAmt, grandTotal: grand,
-      };
-      const { error } = await sb.from("quotations").insert(quotationToRow(rec));
-      if (error) throw error;
-      audit("Quotation created", `${docNo} — ${buyerName}`);
-      await refresh();
-      reset(); setOpen(false);
-    } catch (e) {
-      setError(e.message || String(e));
-    }
+    const payload = {
+      partyId, buyerName, buyerAddress, country, shipmentTerm, paymentTerm,
+      items, igst, igstRate, totalValue: total, igstAmt, grandTotal: grand,
+    };
+    const message = await onSubmit(payload);
+    if (message) setError(message);
     setBusy(false);
   };
+
+  return (
+    <div className={card + " mb-6 p-6"}>
+      <p className="mb-5 font-display text-lg">{isEdit ? `Edit ${initial.docNo}` : "New quotation"}</p>
+      <div className="mb-5 grid gap-4 md:grid-cols-4">
+        <Field label="Party (optional autofill)">
+          <select className={input} value={partyId} onChange={(e) => {
+            setPartyId(e.target.value);
+            const p = store.parties.find((x) => x.id === e.target.value);
+            if (p) { setBuyerName(p.buyerName); setBuyerAddress(p.buyerAddress); setCountry(p.country); setPaymentTerm(p.paymentTerm); setShipmentTerm(p.shipmentTerm || "FOB"); }
+          }}>
+            <option value="">Manual entry</option>
+            {store.parties.map((p) => <option key={p.id} value={p.id}>{p.buyerName}</option>)}
+          </select>
+        </Field>
+        <Field label="Buyer name"><input className={input} value={buyerName} onChange={(e) => { setBuyerName(e.target.value); setError(""); }} /></Field>
+        <Field label="Country"><input className={input} value={country} onChange={(e) => setCountry(e.target.value)} /></Field>
+        <Field label="Shipment term">
+          <select className={input} value={shipmentTerm} onChange={(e) => setShipmentTerm(e.target.value)}>
+            <option>FOB</option><option>CIF</option><option>CNF</option><option>Ex-Factory</option>
+          </select>
+        </Field>
+        <Field label="Buyer address" className="md:col-span-2"><input className={input} value={buyerAddress} onChange={(e) => setBuyerAddress(e.target.value)} /></Field>
+        <Field label="Payment term" className="md:col-span-2"><input className={input} value={paymentTerm} onChange={(e) => setPaymentTerm(e.target.value)} /></Field>
+        {isDomestic && (
+          <React.Fragment>
+            <Field label="IGST applicable" hint="Never applies to international buyers">
+              <select className={input} value={igst ? "yes" : "no"} onChange={(e) => setIgst(e.target.value === "yes")}>
+                <option value="no">No</option><option value="yes">Yes</option>
+              </select>
+            </Field>
+            {igst && <Field label="IGST rate (%)"><input type="number" className={input} value={igstRate} onChange={(e) => setIgstRate(e.target.value)} /></Field>}
+          </React.Fragment>
+        )}
+      </div>
+
+      <div className={panel + " mb-4 overflow-hidden"}>
+        <table className="w-full">
+          <thead><tr><th className={th}>Product</th><th className={th}>HSN</th><th className={th}>Box qty</th><th className={th}>Box rate</th><th className={th}>Value</th><th></th></tr></thead>
+          <tbody>
+            {items.map((it) => (
+              <tr key={it.id} className="border-t border-[var(--line)]">
+                <td className="px-2 py-1.5"><input className={input} value={it.product} onChange={(e) => updateItem(it.id, "product", e.target.value)} /></td>
+                <td className="px-2 py-1.5"><input className={input} value={it.hsn} onChange={(e) => updateItem(it.id, "hsn", e.target.value)} /></td>
+                <td className="px-2 py-1.5"><input type="number" className={input} value={it.boxQty} onChange={(e) => updateItem(it.id, "boxQty", e.target.value)} /></td>
+                <td className="px-2 py-1.5"><input type="number" step="0.01" className={input} value={it.boxRate} onChange={(e) => updateItem(it.id, "boxRate", e.target.value)} /></td>
+                <td className={td + " text-[var(--muted)]"}>{fmtNum(Number(it.boxQty) * Number(it.boxRate))}</td>
+                <td className="px-2">
+                  {items.length > 1 && (
+                    <button onClick={() => setItems(items.filter((x) => x.id !== it.id))}>
+                      <Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button onClick={() => setItems([...items, { id: tempId(), product: "", hsn: "", boxQty: 0, boxRate: 0 }])}
+          className="flex w-full items-center justify-center gap-1 border-t border-[var(--line)] py-2.5 text-xs text-[var(--accent)]">
+          <Plus className="h-3.5 w-3.5" /> Add product line
+        </button>
+      </div>
+
+      <div className="flex items-end justify-between">
+        <div className="text-sm text-[var(--muted)]">
+          <p>Total <span className="text-[var(--text)]">{fmtNum(total)}</span>
+            {igstAmt > 0 && <span> · IGST <span className="text-[var(--text)]">{fmtNum(igstAmt)}</span></span>}
+            {" "}· Grand total <span className="text-[var(--text)]">{fmtNum(grand)}</span></p>
+          <p className="mt-1 text-xs italic">{amountInWords(grand)}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {error && <span className={errText}>{error}</span>}
+          <button onClick={onCancel} className={btnGhost}>Cancel</button>
+          <button onClick={submit} disabled={busy} className={btn}>
+            {busy ? "Saving…" : isEdit ? "Save changes" : "Create quotation"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuotationsPage() {
+  const { store, refresh } = useApp();
+  const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
+  const [printing, setPrinting] = useState(null);
+  const [pageError, setPageError] = useState("");
+
+  const editing = store.quotations.find((q) => q.id === editingId);
+
+  useEffect(() => {
+    if (!printing) return undefined;
+    const t = setTimeout(() => { window.print(); setPrinting(null); }, 60);
+    return () => clearTimeout(t);
+  }, [printing]);
+
+  // Rows left completely blank in the form are not lines; anything else is sent
+  // and the server refuses a line it cannot accept.
+  const cleanItems = (items) => (items || []).filter((i) =>
+    String(i.product || "").trim() !== "" || toNumber(i.boxQty) !== 0 || toNumber(i.boxRate) !== 0);
+
+  const save = (extra, done) => async (payload) => {
+    const message = await attempt(async () => {
+      await call("save_quotation", { p: pick({ ...payload, ...extra, items: cleanItems(payload.items) }, QUOTATION_KEYS) });
+      await refresh();
+    });
+    if (!message) done();
+    return message;
+  };
+
+  const remove = async (q) => {
+    const message = await attempt(async () => {
+      await call("delete_quotation", { p_id: q.id });
+      await refresh();
+    });
+    setPageError(message);
+    if (!message) setConfirmId(null);
+  };
+
+  const boxesOf = (q) => (q.items || []).reduce((s, i) => s + toNumber(i.boxQty), 0);
+  const excelColumns = [
+    { label: "Document", value: (q) => q.docNo, width: 22 },
+    { label: "Date", value: (q) => fmtDate(q.date), width: 12 },
+    { label: "Buyer", value: (q) => q.buyerName, width: 32 },
+    { label: "Country", value: (q) => q.country },
+    { label: "Shipment term", value: (q) => q.shipmentTerm },
+    { label: "Payment term", value: (q) => q.paymentTerm, width: 30 },
+    { label: "Boxes", value: boxesOf, width: 10 },
+    { label: "Total", value: (q) => q.totalValue },
+    { label: "IGST", value: (q) => q.igstAmt },
+    { label: "Grand total", value: (q) => q.grandTotal },
+  ];
 
   return (
     <div>
       <PageHead title="Quotations" blurb="For first-time inquiries, before a buyer is set up as a repeat party. Box rate only — no per-jar rate, and IGST applies to Indian buyers only." />
 
-      <div className="mb-5 flex justify-end">
-        <button onClick={() => setOpen(!open)} className={btn + " flex items-center gap-1.5"}>
+      <div className="mb-5 flex items-center justify-end gap-3">
+        <ExcelButton name="quotations" columns={excelColumns} rows={store.quotations} />
+        <button onClick={() => { setEditingId(null); setOpen(!open); }} className={btn + " flex items-center gap-1.5"}>
           <Plus className="h-4 w-4" /> New quotation
         </button>
       </div>
 
-      {open && (
-        <div className={card + " mb-6 p-6"}>
-          <p className="mb-5 font-serif text-lg">New quotation</p>
-          <div className="mb-5 grid gap-4 md:grid-cols-4">
-            <Field label="Party (optional autofill)">
-              <select className={input} value={partyId} onChange={(e) => {
-                setPartyId(e.target.value);
-                const p = store.parties.find((x) => x.id === e.target.value);
-                if (p) { setBuyerName(p.buyerName); setCountry(p.country); setPaymentTerm(p.paymentTerm); setShipmentTerm(p.shipmentTerm || "FOB"); }
-              }}>
-                <option value="">Manual entry</option>
-                {store.parties.map((p) => <option key={p.id} value={p.id}>{p.buyerName}</option>)}
-              </select>
-            </Field>
-            <Field label="Buyer name"><input className={input} value={buyerName} onChange={(e) => { setBuyerName(e.target.value); setError(""); }} /></Field>
-            <Field label="Country"><input className={input} value={country} onChange={(e) => setCountry(e.target.value)} /></Field>
-            <Field label="Shipment term">
-              <select className={input} value={shipmentTerm} onChange={(e) => setShipmentTerm(e.target.value)}>
-                <option>FOB</option><option>CIF</option><option>CNF</option><option>Ex-Factory</option>
-              </select>
-            </Field>
-            <Field label="Payment term" className="md:col-span-2"><input className={input} value={paymentTerm} onChange={(e) => setPaymentTerm(e.target.value)} /></Field>
-            {isDomestic && (
-              <React.Fragment>
-                <Field label="IGST applicable" hint="Never applies to international buyers">
-                  <select className={input} value={igst ? "yes" : "no"} onChange={(e) => setIgst(e.target.value === "yes")}>
-                    <option value="no">No</option><option value="yes">Yes</option>
-                  </select>
-                </Field>
-                {igst && <Field label="IGST rate (%)"><input type="number" className={input} value={igstRate} onChange={(e) => setIgstRate(e.target.value)} /></Field>}
-              </React.Fragment>
-            )}
-          </div>
+      <div aria-live="polite">{pageError && <p className={errText + " mb-4"}>{pageError}</p>}</div>
 
-          <div className={panel + " mb-4 overflow-hidden"}>
-            <table className="w-full">
-              <thead><tr><th className={th}>Product</th><th className={th}>HSN</th><th className={th}>Box qty</th><th className={th}>Box rate</th><th className={th}>Value</th></tr></thead>
-              <tbody>
-                {items.map((it) => (
-                  <tr key={it.id} className="border-t border-[var(--line)]">
-                    <td className="px-2 py-1.5"><input className={input} value={it.product} onChange={(e) => updateItem(it.id, "product", e.target.value)} /></td>
-                    <td className="px-2 py-1.5"><input className={input} value={it.hsn} onChange={(e) => updateItem(it.id, "hsn", e.target.value)} /></td>
-                    <td className="px-2 py-1.5"><input type="number" className={input} value={it.boxQty} onChange={(e) => updateItem(it.id, "boxQty", e.target.value)} /></td>
-                    <td className="px-2 py-1.5"><input type="number" step="0.01" className={input} value={it.boxRate} onChange={(e) => updateItem(it.id, "boxRate", e.target.value)} /></td>
-                    <td className={td + " text-[var(--muted)]"}>{fmtNum(Number(it.boxQty) * Number(it.boxRate))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <button onClick={() => setItems([...items, { id: uid(), product: "", hsn: "", boxQty: 0, boxRate: 0 }])}
-              className="flex w-full items-center justify-center gap-1 border-t border-[var(--line)] py-2.5 text-xs text-[var(--accent)]">
-              <Plus className="h-3.5 w-3.5" /> Add product line
-            </button>
-          </div>
-
-          <div className="flex items-end justify-between">
-            <div className="text-sm text-[var(--muted)]">
-              <p>Total <span className="text-[var(--text)]">{fmtNum(total)}</span>
-                {igstAmt > 0 && <span> · IGST <span className="text-[var(--text)]">{fmtNum(igstAmt)}</span></span>}
-                {" "}· Grand total <span className="text-[var(--text)]">{fmtNum(grand)}</span></p>
-              <p className="mt-1 text-xs italic">{numberToWords(grand)} only</p>
-            </div>
-            <div className="flex items-center gap-3">
-              {error && <span className={errText}>{error}</span>}
-              <button onClick={() => { reset(); setOpen(false); }} className={btnGhost}>Cancel</button>
-              <button onClick={create} className={btn}>Create quotation</button>
-            </div>
-          </div>
-        </div>
+      {open && !editing && <QuotationForm onCancel={() => setOpen(false)} onSubmit={save({}, () => setOpen(false))} />}
+      {editing && (
+        <QuotationForm key={editing.id} initial={editing} onCancel={() => setEditingId(null)}
+          onSubmit={save({ id: editing.id, expectedUpdatedAt: editing.updatedAt }, () => setEditingId(null))} />
       )}
 
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
           <thead className="bg-[var(--panel)]">
-            <tr><th className={th}>Document</th><th className={th}>Date</th><th className={th}>Buyer</th><th className={th}>Country</th><th className={th}>Term</th><th className={th}>Value</th></tr>
+            <tr>
+              <th className={th}>Document</th><th className={th}>Date</th><th className={th}>Buyer</th>
+              <th className={th}>Country</th><th className={th}>Term</th>
+              <th className={th + " text-right"}>Boxes</th><th className={th + " text-right"}>Value</th>
+              <th className={th + " text-right"}>Actions</th>
+            </tr>
           </thead>
           <tbody>
             {store.quotations.map((q) => (
               <tr key={q.id} className="border-t border-[var(--line)]">
-                <td className={td + " font-mono text-xs"}>{q.docNo}</td>
-                <td className={td + " text-[var(--muted)]"}>{q.date}</td>
+                <td className={td + " font-num text-xs"}>{q.docNo}</td>
+                <td className={td + " text-[var(--muted)]"}>{fmtDate(q.date)}</td>
                 <td className={td + " font-medium"}>{q.buyerName}</td>
                 <td className={td}>{q.country}</td>
                 <td className={td + " text-[var(--muted)]"}>{q.shipmentTerm}</td>
-                <td className={td}>{fmtNum(q.grandTotal)}</td>
+                <td className={tdNum}>{boxesOf(q)}</td>
+                <td className={tdNum}>{fmtNum(q.grandTotal)}</td>
+                <td className={td + " text-right"}>
+                  {confirmId === q.id ? (
+                    <span className="flex items-center justify-end gap-3">
+                      <span className="text-xs text-[var(--status-danger)]">Retire {q.docNo}?</span>
+                      <button onClick={() => remove(q)} className="text-xs text-[var(--status-danger)]">Confirm</button>
+                      <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--muted)]">Cancel</button>
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-end gap-4">
+                      <button onClick={() => setPrinting(q)} className="flex items-center gap-1 text-xs text-[var(--accent)]">
+                        <Download className="h-3 w-3" /> PDF
+                      </button>
+                      <button onClick={() => { setOpen(false); setEditingId(q.id); }} className="text-xs text-[var(--accent)]">Edit</button>
+                      <button onClick={() => setConfirmId(q.id)} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Delete</button>
+                    </span>
+                  )}
+                </td>
               </tr>
             ))}
-            {store.quotations.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--muted)]">No quotations yet.</td></tr>}
+            {store.quotations.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                No quotations yet — “New quotation” starts the first one.
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
+
+      {printing && (
+        <PrintDocument>
+          <QuotationDocument q={printing} company={store.company} />
+        </PrintDocument>
+      )}
     </div>
   );
 }
@@ -1220,7 +1117,7 @@ function ProformaForm({ type, onSave, onCancel }) {
   const party = store.parties.find((p) => p.id === partyId);
   const [quotationRef, setQuotationRef] = useState("");
   const [orderNo, setOrderNo] = useState("");
-  const [orderDate, setOrderDate] = useState(todayISO());
+  const [orderDate, setOrderDate] = useState(todayIST());
   const [items, setItems] = useState([]);
   const [extra, setExtra] = useState("");
   const [taxRate, setTaxRate] = useState(5);
@@ -1240,23 +1137,21 @@ function ProformaForm({ type, onSave, onCancel }) {
     if (!p) return;
     // Weights ride along so the packing list can be produced from the shipment alone.
     setItems([...items, {
-      id: uid(), productId, name: p.name, hsn: p.hsn, boxQty: 0,
+      id: tempId(), productId, name: p.name, hsn: p.hsn, boxQty: 0,
       rate: Number(p.rate) || 0, mrp: Number(p.mrp) || 0,
       netWt: Number(p.netWt) || 0, grossWt: Number(p.grossWt) || 0,
       packsPerBox: Number(p.packsPerBox) || 0, weightPerPackG: Number(p.weightPerPackG) || 0,
     }]);
   };
 
-  const totalBoxes = items.reduce((s, i) => s + Number(i.boxQty), 0);
-  const totalValue = items.reduce((s, i) => s + Number(i.boxQty) * Number(i.rate), 0);
-  const taxableValue = items.reduce((s, i) => s + Number(i.boxQty) * Number(i.mrp), 0);
-  const taxAmount = !isIntl ? (taxableValue * Number(taxRate)) / 100 : 0;
-  const grandTotal = isIntl ? totalValue : taxableValue + taxAmount;
+  const totals = proformaTotals({ items, type, taxRate });
+  const totalBoxes = totals.boxes, totalUnits = totals.units, totalValue = totals.total;
+  const taxableValue = totals.taxable, taxAmount = totals.tax, grandTotal = totals.grand;
 
   return (
     <div className={card + " mb-6 p-6"}>
       <div className="mb-5 flex items-start justify-between">
-        <p className="font-serif text-lg">New {isIntl ? "international" : "private-label / merchant-export"} proforma</p>
+        <p className="font-display text-lg">New {isIntl ? "international" : "private-label / merchant-export"} proforma</p>
         <button onClick={onCancel}><X className="h-4 w-4 text-[var(--muted)]" /></button>
       </div>
 
@@ -1305,12 +1200,12 @@ function ProformaForm({ type, onSave, onCancel }) {
             {items.map((it) => (
               <tr key={it.id} className="border-t border-[var(--line)]">
                 <td className={td}>{it.name}</td>
-                <td className={td + " font-mono text-xs text-[var(--muted)]"}>{it.hsn}</td>
+                <td className={td + " font-num text-xs text-[var(--muted)]"}>{it.hsn}</td>
                 <td className={td}>{fmtNum(isIntl ? it.rate : it.mrp)}</td>
                 <td className="px-2 py-1.5 w-32"><input type="number" className={input} value={it.boxQty}
                   onChange={(e) => setItems(items.map((x) => (x.id === it.id ? { ...x, boxQty: e.target.value } : x)))} /></td>
                 <td className={td + " text-[var(--muted)]"}>{fmtNum(Number(it.boxQty) * Number(isIntl ? it.rate : it.mrp))}</td>
-                <td className="px-2"><button onClick={() => setItems(items.filter((x) => x.id !== it.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--danger)]" /></button></td>
+                <td className="px-2"><button onClick={() => setItems(items.filter((x) => x.id !== it.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" /></button></td>
               </tr>
             ))}
             {items.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-xs text-[var(--muted)]">No product lines yet.</td></tr>}
@@ -1319,7 +1214,7 @@ function ProformaForm({ type, onSave, onCancel }) {
             <tfoot>
               <tr className="border-t border-[var(--line)] bg-[var(--field)]">
                 <td className={td + " text-xs uppercase tracking-wider text-[var(--muted)]"} colSpan={3}>Subtotal</td>
-                <td className={td}>{totalBoxes} boxes</td>
+                <td className={td}>{totalBoxes} boxes · {totalUnits} units</td>
                 <td className={td}>{fmtNum(isIntl ? totalValue : taxableValue)}</td><td></td>
               </tr>
             </tfoot>
@@ -1338,12 +1233,12 @@ function ProformaForm({ type, onSave, onCancel }) {
           {isIntl
             ? <p>Total value <span className="text-[var(--text)]">{fmtMoney(totalValue, party.currency)}</span></p>
             : <p>Taxable <span className="text-[var(--text)]">{fmtNum(taxableValue)}</span> · Tax <span className="text-[var(--text)]">{fmtNum(taxAmount)}</span> · Grand total <span className="text-[var(--text)]">{fmtNum(grandTotal)}</span></p>}
-          <p className="mt-1 text-xs italic">{numberToWords(grandTotal)} only</p>
+          <p className="mt-1 text-xs italic">{amountInWords(grandTotal, party.currency)}</p>
         </div>
         <div className="flex gap-3">
           <button onClick={onCancel} className={btnGhost}>Cancel</button>
           <button className={btn} onClick={() => onSave({
-            id: uid(), type, date: todayISO(), partyId, quotationRef,
+            id: tempId(), type, date: todayIST(), partyId, quotationRef,
             buyerName: party.buyerName, buyerAddress: party.buyerAddress,
             consigneeName: party.consigneeName, consigneeAddress: party.consigneeAddress,
             consigneeOptions: party.consigneeOptions || [party.consigneeName],
@@ -1360,25 +1255,35 @@ function ProformaForm({ type, onSave, onCancel }) {
 }
 
 function ProformaPage() {
-  const { store, refresh, audit } = useApp();
+  const { store, refresh } = useApp();
   const [form, setForm] = useState(null);
   const [tab, setTab] = useState("open");
   const [saveError, setSaveError] = useState("");
   const list = tab === "open" ? store.pis.filter((p) => !p.linkedFinalInvoiceId) : store.pis;
 
   const createProforma = async (pi) => {
-    setSaveError("");
-    try {
-      const docNo = await nextDocNo(pi.type === "international" ? "pi_international" : "pi_domestic");
-      const { error } = await sb.from("proformas").insert(proformaToRow({ ...pi, docNo }));
-      if (error) throw error;
-      audit("Proforma created", `${docNo} — ${pi.buyerName}`);
+    const message = await attempt(async () => {
+      await call("create_proforma", { p: pick(pi, PROFORMA_KEYS) });
       await refresh();
-      setForm(null);
-    } catch (e) {
-      setSaveError(e.message || String(e));
-    }
+    });
+    setSaveError(message);
+    if (!message) setForm(null);
   };
+
+  const unitsOf = (pi) => (pi.items || []).reduce((s, i) => s + unitsFromBoxes(i.boxQty, i.packsPerBox), 0);
+  const excelColumns = [
+    { label: "Document", value: (p) => p.docNo, width: 24 },
+    { label: "Date", value: (p) => fmtDate(p.date), width: 12 },
+    { label: "Buyer", value: (p) => p.buyerName, width: 32 },
+    { label: "Type", value: (p) => p.type },
+    { label: "Order no.", value: (p) => p.buyerOrderNo },
+    { label: "Order date", value: (p) => fmtDate(p.buyerOrderDate), width: 12 },
+    { label: "Boxes", value: (p) => p.totalBoxes, width: 10 },
+    { label: "Units", value: unitsOf, width: 10 },
+    { label: "Currency", value: (p) => p.currency, width: 10 },
+    { label: "Value", value: (p) => p.grandTotal },
+    { label: "Status", value: (p) => (p.linkedFinalInvoiceId ? "Invoiced" : "Open") },
+  ];
 
   return (
     <div>
@@ -1387,36 +1292,47 @@ function ProformaPage() {
       <div className="mb-5 flex items-center justify-between">
         <div className="flex gap-1 rounded-lg border border-[var(--line)] p-1">
           {[["open", "Open"], ["all", "All"]].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)} className={`rounded-md px-3 py-1.5 text-sm ${tab === k ? "bg-[var(--field)] text-[var(--text)]" : "text-[var(--muted)]"}`}>{l}</button>
+            <button key={k} onClick={() => setTab(k)} aria-pressed={tab === k}
+              className={`rounded-md px-3 py-1.5 text-sm ${tab === k ? "bg-[var(--field)] text-[var(--text)]" : "text-[var(--muted)]"}`}>{l}</button>
           ))}
         </div>
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          <ExcelButton name="proforma-invoices" columns={excelColumns} rows={list} />
           <button onClick={() => setForm("international")} className={btn + " flex items-center gap-1.5"}><Plus className="h-4 w-4" /> International</button>
           <button onClick={() => setForm("domestic")} className={btnGhost + " flex items-center gap-1.5 py-2"}><Plus className="h-4 w-4" /> Private label</button>
         </div>
       </div>
 
-      {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
-      {form && <ProformaForm type={form} onCancel={() => setForm(null)} onSave={createProforma} />}
+      <div aria-live="polite">{saveError && <p className={errText + " mb-4"}>{saveError}</p>}</div>
+      {form && <ProformaForm key={form} type={form} onCancel={() => setForm(null)} onSave={createProforma} />}
 
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
           <thead className="bg-[var(--panel)]">
-            <tr><th className={th}>Document</th><th className={th}>Date</th><th className={th}>Buyer</th><th className={th}>Type</th><th className={th}>Boxes</th><th className={th}>Value</th><th className={th}>Status</th></tr>
+            <tr>
+              <th className={th}>Document</th><th className={th}>Date</th><th className={th}>Buyer</th><th className={th}>Type</th>
+              <th className={th + " text-right"}>Boxes</th><th className={th + " text-right"}>Units</th>
+              <th className={th + " text-right"}>Value</th><th className={th}>Status</th>
+            </tr>
           </thead>
           <tbody>
             {list.map((pi) => (
               <tr key={pi.id} className="border-t border-[var(--line)]">
-                <td className={td + " font-mono text-xs"}>{pi.docNo}</td>
-                <td className={td + " text-[var(--muted)]"}>{pi.date}</td>
+                <td className={td + " font-num text-xs"}>{pi.docNo}</td>
+                <td className={td + " text-[var(--muted)]"}>{fmtDate(pi.date)}</td>
                 <td className={td + " font-medium"}>{pi.buyerName}</td>
                 <td className={td + " capitalize text-[var(--muted)]"}>{pi.type}</td>
-                <td className={td}>{pi.totalBoxes ?? "—"}</td>
-                <td className={td}>{fmtMoney(pi.grandTotal ?? pi.totalValue, pi.currency)}</td>
+                <td className={tdNum}>{pi.totalBoxes}</td>
+                <td className={tdNum}>{unitsOf(pi)}</td>
+                <td className={tdNum}>{fmtMoney(pi.grandTotal, pi.currency)}</td>
                 <td className={td}>{pi.linkedFinalInvoiceId ? <Chip tone="ok">Invoiced</Chip> : <Chip tone="warn">Open</Chip>}</td>
               </tr>
             ))}
-            {list.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-[var(--muted)]">Nothing in this view.</td></tr>}
+            {list.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                {tab === "open" ? "No open proforma invoices — every one raised so far has been invoiced." : "No proforma invoices yet."}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -1425,9 +1341,9 @@ function ProformaPage() {
 }
 
 /* ----------------------------------------------------------- shipments */
-function ShipmentForm({ pi, onSave, onCancel }) {
-  const { store } = useApp();
-  const [exchangeRate, setExchangeRate] = useState(1);
+function ShipmentForm({ pi, onSave, onCancel, error }) {
+  const needsRate = pi.currency !== "INR";
+  const [exchangeRate, setExchangeRate] = useState(needsRate ? "" : "1");
   const [containerNo, setContainerNo] = useState("");
   const [vehicleNo, setVehicleNo] = useState("");
   const [customSeal, setCustomSeal] = useState("");
@@ -1442,38 +1358,45 @@ function ShipmentForm({ pi, onSave, onCancel }) {
   const [taxConsignee, setTaxConsignee] = useState("TO THE ORDER");
   const [commercialCurrency, setCommercialCurrency] = useState(pi.currency);
   const [commercialConsignee, setCommercialConsignee] = useState(pi.consigneeName);
-  const [items, setItems] = useState(pi.items.map((i) => ({ ...i, batchNo: "", mfgDate: todayISO(), expDate: "" })));
+  const [items, setItems] = useState(pi.items.map((i) => ({ ...i, batchNo: "", mfgDate: todayIST(), expDate: "" })));
+  const [busy, setBusy] = useState(false);
 
   const upd = (id, k, v) => setItems(items.map((i) => (i.id === id ? { ...i, [k]: v } : i)));
-  const isIntl = pi.type === "international";
-  const lineRate = (i) => Number(isIntl ? i.rate : i.mrp) || 0;
 
-  const baseTotal = items.reduce((s, i) => s + Number(i.boxQty) * lineRate(i), 0);
-  const adjustedTotal = baseTotal + Number(freight) + Number(otherAdj);
-  const gstAmt = (adjustedTotal * Number(gstPercent)) / 100;
-  const grandTotal = adjustedTotal + gstAmt + Number(roundOff);
+  // A preview of what the server will compute — the saved figures are the server's.
+  const t = shipmentTotals({
+    items, type: pi.type, currency: pi.currency, exchangeRate, gstPercent, roundOff, freight, otherAdj, commercialCurrency,
+  });
+  const missingWeights = items.some((i) => !toNumber(i.netWt) || !toNumber(i.grossWt));
 
-  const totalBoxes = items.reduce((s, i) => s + Number(i.boxQty), 0);
-  const totalPacks = items.reduce((s, i) => s + Number(i.boxQty) * (Number(i.packsPerBox) || 0), 0);
-  const netWeight = items.reduce((s, i) => s + Number(i.boxQty) * (Number(i.netWt) || 0), 0);
-  const grossWeight = items.reduce((s, i) => s + Number(i.boxQty) * (Number(i.grossWt) || 0), 0);
-  const missingWeights = items.some((i) => !Number(i.netWt) || !Number(i.grossWt));
+  const submit = async () => {
+    setBusy(true);
+    await onSave({
+      piId: pi.id, items, freight, otherAdj, otherReason, gstPercent, roundOff, exchangeRate,
+      commercialCurrency, commercialConsignee, taxConsignee,
+      containerNo, vehicleNo, customSeal, lineSeal, portOfLoading, incoterm,
+    });
+    setBusy(false);
+  };
 
   return (
     <div className={card + " mb-6 p-6"}>
       <div className="mb-5 flex items-start justify-between">
         <div>
-          <p className="font-serif text-lg">Shipment against {pi.docNo}</p>
+          <p className="font-display text-lg">Shipment against {pi.docNo}</p>
           <p className="mt-1 text-xs text-[var(--muted)]">
-            {pi.buyerName} · order {pi.buyerOrderNo || "—"} of {pi.buyerOrderDate || "—"} · one pass produces the tax invoice, commercial invoice and packing list.
+            {pi.buyerName} · order {pi.buyerOrderNo || "—"} of {fmtDate(pi.buyerOrderDate)} · one pass produces the tax invoice, commercial invoice and packing list.
           </p>
         </div>
-        <button onClick={onCancel}><X className="h-4 w-4 text-[var(--muted)]" /></button>
+        <button onClick={onCancel} aria-label="Close"><X className="h-4 w-4 text-[var(--muted)]" /></button>
       </div>
 
       <p className="mb-3 text-sm font-medium">Marks &amp; numbers</p>
       <div className="mb-6 grid gap-4 md:grid-cols-4">
-        <Field label="Exchange rate"><input type="number" step="0.01" className={input} value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} /></Field>
+        <Field label={`Exchange rate (₹ per ${pi.currency})`} hint={needsRate ? "Needed: the tax invoice is in INR" : "Not needed — this proforma is already in INR"}>
+          <input type="number" step="0.01" className={input} value={exchangeRate} disabled={!needsRate}
+            onChange={(e) => setExchangeRate(e.target.value)} />
+        </Field>
         <Field label="Container no."><input className={input} value={containerNo} onChange={(e) => setContainerNo(e.target.value)} /></Field>
         <Field label="Vehicle no."><input className={input} value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} /></Field>
         <Field label="Customs seal"><input className={input} value={customSeal} onChange={(e) => setCustomSeal(e.target.value)} /></Field>
@@ -1491,19 +1414,23 @@ function ShipmentForm({ pi, onSave, onCancel }) {
       <div className={panel + " mb-3 overflow-x-auto"}>
         <table className="w-full">
           <thead>
-            <tr><th className={th}>Product</th><th className={th}>Box qty</th><th className={th}>Qty (nos)</th><th className={th}>Batch</th><th className={th}>MFG</th><th className={th}>EXP</th><th className={th}>Net / gross kg</th></tr>
+            <tr>
+              <th className={th}>Product</th><th className={th}>Boxes</th><th className={th + " text-right"}>Units</th>
+              <th className={th}>Batch</th><th className={th}>MFG</th><th className={th}>EXP</th>
+              <th className={th + " text-right"}>Net / gross kg</th>
+            </tr>
           </thead>
           <tbody>
             {items.map((it) => (
               <tr key={it.id} className="border-t border-[var(--line)]">
                 <td className={td}>{it.name}</td>
-                <td className="px-2 py-1.5 w-28"><input type="number" className={input} value={it.boxQty} onChange={(e) => upd(it.id, "boxQty", e.target.value)} /></td>
-                <td className={td + " text-[var(--muted)]"}>{Number(it.boxQty) * (Number(it.packsPerBox) || 0)}</td>
+                <td className="w-28 px-2 py-1.5"><input type="number" className={input} value={it.boxQty} onChange={(e) => upd(it.id, "boxQty", e.target.value)} /></td>
+                <td className={tdNum + " text-[var(--muted)]"}>{unitsFromBoxes(it.boxQty, it.packsPerBox)}</td>
                 <td className="px-2 py-1.5"><input className={input} value={it.batchNo} onChange={(e) => upd(it.id, "batchNo", e.target.value)} /></td>
                 <td className="px-2 py-1.5"><input type="date" className={input} value={it.mfgDate} onChange={(e) => upd(it.id, "mfgDate", e.target.value)} /></td>
                 <td className="px-2 py-1.5"><input type="date" className={input} value={it.expDate} onChange={(e) => upd(it.id, "expDate", e.target.value)} /></td>
-                <td className={td + " whitespace-nowrap text-[var(--muted)]"}>
-                  {fmtNum(Number(it.boxQty) * (Number(it.netWt) || 0))} / {fmtNum(Number(it.boxQty) * (Number(it.grossWt) || 0))}
+                <td className={tdNum + " whitespace-nowrap text-[var(--muted)]"}>
+                  {fmtNum(toNumber(it.boxQty) * toNumber(it.netWt))} / {fmtNum(toNumber(it.boxQty) * toNumber(it.grossWt))}
                 </td>
               </tr>
             ))}
@@ -1511,21 +1438,23 @@ function ShipmentForm({ pi, onSave, onCancel }) {
         </table>
       </div>
       {missingWeights && (
-        <p className="mb-6 flex items-start gap-2 text-xs text-amber-400">
+        <p className="mb-6 flex items-start gap-2 text-xs text-[var(--status-warn)]">
           <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
-          A line has no net/gross weight on the party master, so packing list totals will be short. Fill the weights under Parties and raise the proforma again.
+          A line has no net or gross weight on the party master, so the packing list totals will be short. Fill the weights under Parties and raise the proforma again.
         </p>
       )}
 
-      <p className="mb-3 mt-6 text-sm font-medium">Adjustments</p>
+      <p className="mb-3 mt-6 text-sm font-medium">Adjustments <span className="font-normal text-[var(--muted)]">— in {pi.currency}, except GST and round-off which apply to the INR tax invoice</span></p>
       <div className="mb-6 grid gap-4 md:grid-cols-4">
         <Field label="GST % (tax invoice)"><input type="number" className={input} value={gstPercent} onChange={(e) => setGstPercent(e.target.value)} /></Field>
-        <Field label="Round off"><input type="number" step="0.01" className={input} value={roundOff} onChange={(e) => setRoundOff(e.target.value)} /></Field>
-        <Field label="Freight" hint={incoterm === "FOB" ? "Add when Das Superfoods books the vessel" : "Already inside " + incoterm}>
+        <Field label="Round off (₹)"><input type="number" step="0.01" className={input} value={roundOff} onChange={(e) => setRoundOff(e.target.value)} /></Field>
+        <Field label={`Freight (${pi.currency})`} hint={incoterm === "FOB" ? "Add when Das Superfoods books the vessel" : "Already inside " + incoterm}>
           <input type="number" step="0.01" className={input} value={freight} onChange={(e) => setFreight(e.target.value)} />
         </Field>
-        <Field label="Other charge / deduction"><input type="number" step="0.01" className={input} value={otherAdj} onChange={(e) => setOtherAdj(e.target.value)} /></Field>
-        {Number(otherAdj) !== 0 && <Field label="Reason" className="md:col-span-2"><input className={input} value={otherReason} onChange={(e) => setOtherReason(e.target.value)} /></Field>}
+        <Field label={`Other charge / deduction (${pi.currency})`}><input type="number" step="0.01" className={input} value={otherAdj} onChange={(e) => setOtherAdj(e.target.value)} /></Field>
+        {toNumber(otherAdj) !== 0 && (
+          <Field label="Reason (required)" className="md:col-span-2"><input className={input} value={otherReason} onChange={(e) => setOtherReason(e.target.value)} /></Field>
+        )}
       </div>
 
       <p className="mb-3 text-sm font-medium">Consignee &amp; currency</p>
@@ -1548,72 +1477,78 @@ function ShipmentForm({ pi, onSave, onCancel }) {
       <div className="mb-6 grid gap-4 md:grid-cols-3">
         <div className={panel + " p-4 text-sm"}>
           <p className="mb-2 text-xs uppercase tracking-wider text-[var(--faint)]">Tax invoice · INR</p>
-          <p className="text-[var(--muted)]">Total <span className="text-[var(--text)]">{fmtNum(adjustedTotal)}</span></p>
-          <p className="text-[var(--muted)]">GST <span className="text-[var(--text)]">{fmtNum(gstAmt)}</span></p>
-          <p className="mt-1 font-medium">Grand total {fmtNum(grandTotal)}</p>
-          <p className="mt-1 text-xs italic text-[var(--muted)]">{numberToWords(grandTotal)} only</p>
+          {t.needsExchangeRate ? (
+            <p className="text-[var(--status-warn)]">Enter the exchange rate to see the INR figures.</p>
+          ) : (
+            <React.Fragment>
+              <p className="text-[var(--muted)]">Total <span className="font-num text-[var(--text)]">{fmtMoney(t.inrTotal, "INR")}</span></p>
+              <p className="text-[var(--muted)]">GST <span className="font-num text-[var(--text)]">{fmtMoney(t.gst, "INR")}</span></p>
+              <p className="mt-1 font-medium">Grand total <span className="font-num">{fmtMoney(t.grandTotal, "INR")}</span></p>
+              <p className="mt-1 text-xs italic text-[var(--muted)]">{amountInWords(t.grandTotal, "INR")}</p>
+            </React.Fragment>
+          )}
         </div>
         <div className={panel + " p-4 text-sm"}>
-          <p className="mb-2 text-xs uppercase tracking-wider text-[var(--faint)]">Commercial invoice · {commercialCurrency}</p>
+          <p className="mb-2 text-xs uppercase tracking-wider text-[var(--faint)]">Commercial invoice · {t.commercialCurrency}</p>
           <p className="text-[var(--muted)]">{commercialConsignee}</p>
           <p className="text-[var(--muted)]">Incoterm {incoterm}</p>
-          <p className="mt-1 font-medium">{fmtMoney(adjustedTotal, commercialCurrency)}</p>
+          <p className="mt-1 font-medium font-num">{fmtMoney(t.commercialTotal, t.commercialCurrency)}</p>
         </div>
         <div className={panel + " p-4 text-sm"}>
           <p className="mb-2 text-xs uppercase tracking-wider text-[var(--faint)]">Packing list</p>
-          <p className="text-[var(--muted)]">{totalBoxes} boxes · {totalPacks} nos</p>
-          <p className="text-[var(--muted)]">Net {fmtNum(netWeight, 3)} kg</p>
-          <p className="text-[var(--muted)]">Gross {fmtNum(grossWeight, 3)} kg</p>
-          <p className="mt-1 font-medium">Total {fmtNum(netWeight + grossWeight, 3)} kg</p>
+          <p className="text-[var(--muted)]"><span className="font-num text-[var(--text)]">{t.boxes}</span> boxes · <span className="font-num text-[var(--text)]">{t.packs}</span> units</p>
+          <p className="text-[var(--muted)]">Net <span className="font-num">{fmtNum(t.net, 3)}</span> kg · <span className="font-num">{fmtNum(t.net / 1000, 3)}</span> t</p>
+          <p className="text-[var(--muted)]">Gross <span className="font-num">{fmtNum(t.gross, 3)}</span> kg · <span className="font-num">{fmtNum(t.gross / 1000, 3)}</span> t</p>
         </div>
       </div>
 
-      <div className="flex justify-end gap-3">
+      <div className="flex items-center justify-end gap-3">
+        <span aria-live="polite" className={errText}>{error}</span>
         <button onClick={onCancel} className={btnGhost}>Cancel</button>
-        <button className={btn} onClick={() => onSave({
-          id: uid(), piId: pi.id, piNo: pi.docNo, piDate: pi.date, date: todayISO(),
-          buyerName: pi.buyerName, buyerAddress: pi.buyerAddress,
-          orderNo: pi.buyerOrderNo, orderDate: pi.buyerOrderDate,
-          exchangeRate, containerNo, vehicleNo, customSeal, lineSeal, portOfLoading, incoterm, items,
-          gstPercent, roundOff, freight, otherAdj, otherReason, company: store.company,
-          taxInvoice: { consignee: taxConsignee, currency: "INR", total: adjustedTotal, gst: gstAmt, roundOff: Number(roundOff), grandTotal, amountInWords: numberToWords(grandTotal) },
-          commercialInvoice: { consignee: commercialConsignee, currency: commercialCurrency, total: adjustedTotal, amountInWords: numberToWords(adjustedTotal) },
-          packingList: { totalBoxes, totalPacks, netWeight, grossWeight, grandTotal: netWeight + grossWeight },
-        })}>Generate document set</button>
+        <button onClick={submit} disabled={busy} className={btn}>{busy ? "Saving…" : "Generate document set"}</button>
       </div>
     </div>
   );
 }
 
 function ShipmentsPage() {
-  const { store, refresh, audit } = useApp();
+  const { store, refresh } = useApp();
   const [formPiId, setFormPiId] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [saveError, setSaveError] = useState("");
 
-  // Writing the shipment and closing its proforma are two statements; if the
-  // second fails the proforma stays open rather than silently vanishing from
-  // the list, which is the safer way round.
-  const createShipment = async (fi) => {
-    setSaveError("");
-    try {
-      const docNo = await nextDocNo("final");
-      const rec = { ...fi, docNo, taxDocNo: docNo + "-TAX", commercialDocNo: docNo + "-COM" };
-      const { data, error } = await sb.from("shipments").insert(shipmentToRow(rec)).select("id").single();
-      if (error) throw error;
-      const link = await sb.from("proformas").update({ shipment_id: data.id }).eq("id", rec.piId);
-      if (link.error) throw link.error;
-      audit("Shipment invoiced", `${docNo} against ${rec.piNo} — ${rec.buyerName}`);
-      await refresh();
-      setFormPiId(null);
-    } catch (e) {
-      setSaveError(e.message || String(e));
-    }
-  };
-
   const openPis = store.pis.filter((p) => !p.linkedFinalInvoiceId);
   const pi = formPiId ? store.pis.find((p) => p.id === formPiId) : null;
   const detail = detailId ? store.finalInvoices.find((f) => f.id === detailId) : null;
+
+  // Invoice number, shipment row and "proforma is now invoiced" are one transaction.
+  const createShipment = async (payload) => {
+    const message = await attempt(async () => {
+      await call("create_shipment", { p: pick(payload, SHIPMENT_KEYS) });
+      await refresh();
+    });
+    setSaveError(message);
+    if (!message) setFormPiId(null);
+  };
+
+  const excelColumns = [
+    { label: "Invoice", value: (f) => f.docNo, width: 22 },
+    { label: "Date", value: (f) => fmtDate(f.date), width: 12 },
+    { label: "Buyer", value: (f) => f.buyerName, width: 32 },
+    { label: "Against proforma", value: (f) => f.piNo, width: 24 },
+    { label: "Container", value: (f) => f.containerNo },
+    { label: "Boxes", value: (f) => f.packingList.totalBoxes, width: 10 },
+    { label: "Units", value: (f) => f.packingList.totalPacks, width: 10 },
+    { label: "Net kg", value: (f) => f.packingList.netWeight },
+    { label: "Gross kg", value: (f) => f.packingList.grossWeight },
+    { label: "Gross tonnes", value: (f) => toNumber(f.packingList.grossWeight) / 1000 },
+    { label: "Exchange rate", value: (f) => f.exchangeRate },
+    { label: "Tax invoice total (INR)", value: (f) => f.taxInvoice.total, width: 22 },
+    { label: "GST (INR)", value: (f) => f.taxInvoice.gst },
+    { label: "Tax invoice grand total (INR)", value: (f) => f.taxInvoice.grandTotal, width: 26 },
+    { label: "Commercial currency", value: (f) => f.commercialInvoice.currency },
+    { label: "Commercial value", value: (f) => f.commercialInvoice.total },
+  ];
 
   return (
     <div>
@@ -1622,15 +1557,15 @@ function ShipmentsPage() {
       {!pi && (
         <div className={card + " mb-6 p-5"}>
           <p className="mb-4 text-sm font-medium">Pick the proforma this shipment is against</p>
-          {openPis.length === 0 && <p className="text-sm text-[var(--muted)]">No open proforma invoices — create one first.</p>}
+          {openPis.length === 0 && <p className="text-sm text-[var(--muted)]">No open proforma invoices — raise one under Proforma first.</p>}
           <div className="space-y-2">
             {openPis.map((p) => (
               <div key={p.id} className={panel + " flex items-center justify-between px-4 py-3"}>
                 <div>
-                  <p className="text-sm font-medium">{p.buyerName} <span className="ml-2 font-mono text-xs text-[var(--muted)]">{p.docNo}</span></p>
-                  <p className="text-xs text-[var(--muted)]">{fmtMoney(p.grandTotal ?? p.totalValue, p.currency)} · {p.totalBoxes ?? 0} boxes</p>
+                  <p className="text-sm font-medium">{p.buyerName} <span className="ml-2 font-num text-xs text-[var(--muted)]">{p.docNo}</span></p>
+                  <p className="text-xs text-[var(--muted)]">{fmtMoney(p.grandTotal, p.currency)} · {p.totalBoxes} boxes · raised {fmtDate(p.date)}</p>
                 </div>
-                <button onClick={() => setFormPiId(p.id)} className="flex items-center gap-1 text-sm text-[var(--accent)]">
+                <button onClick={() => { setSaveError(""); setFormPiId(p.id); }} className="flex items-center gap-1 text-sm text-[var(--accent)]">
                   Create shipment <ChevronRight className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -1639,63 +1574,76 @@ function ShipmentsPage() {
         </div>
       )}
 
-      {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
-      {pi && <ShipmentForm pi={pi} onCancel={() => setFormPiId(null)} onSave={createShipment} />}
+      {pi && <ShipmentForm key={pi.id} pi={pi} error={saveError} onCancel={() => setFormPiId(null)} onSave={createShipment} />}
 
+      <div className="mb-3 flex justify-end">
+        <ExcelButton name="shipments" columns={excelColumns} rows={store.finalInvoices} />
+      </div>
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
           <thead className="bg-[var(--panel)]">
-            <tr><th className={th}>Invoice</th><th className={th}>Date</th><th className={th}>Buyer</th><th className={th}>Against</th><th className={th}>Grand total</th><th className={th}>Net / gross</th><th></th></tr>
+            <tr>
+              <th className={th}>Invoice</th><th className={th}>Date</th><th className={th}>Buyer</th><th className={th}>Against</th>
+              <th className={th + " text-right"}>Boxes / units</th>
+              <th className={th + " text-right"}>Grand total (INR)</th>
+              <th className={th + " text-right"}>Net / gross kg</th><th></th>
+            </tr>
           </thead>
           <tbody>
             {store.finalInvoices.map((fi) => (
               <tr key={fi.id} className="border-t border-[var(--line)]">
-                <td className={td + " font-mono text-xs"}>{fi.docNo}</td>
-                <td className={td + " text-[var(--muted)]"}>{fi.date}</td>
+                <td className={td + " font-num text-xs"}>{fi.docNo}</td>
+                <td className={td + " text-[var(--muted)]"}>{fmtDate(fi.date)}</td>
                 <td className={td}>{fi.buyerName}</td>
-                <td className={td + " font-mono text-xs text-[var(--muted)]"}>{fi.piNo}</td>
-                <td className={td}>{fmtNum(fi.taxInvoice.grandTotal)}</td>
-                <td className={td + " text-[var(--muted)]"}>{fmtNum(fi.packingList.netWeight)} / {fmtNum(fi.packingList.grossWeight)} kg</td>
+                <td className={td + " font-num text-xs text-[var(--muted)]"}>{fi.piNo}</td>
+                <td className={tdNum}>{fi.packingList.totalBoxes} / {fi.packingList.totalPacks}</td>
+                <td className={tdNum}>{fmtMoney(fi.taxInvoice.grandTotal, "INR")}</td>
+                <td className={tdNum + " text-[var(--muted)]"}>{fmtNum(fi.packingList.netWeight)} / {fmtNum(fi.packingList.grossWeight)}</td>
                 <td className={td + " text-right"}>
-                  <button onClick={() => setDetailId(detailId === fi.id ? null : fi.id)} className="text-xs text-[var(--accent)]">
+                  <button onClick={() => setDetailId(detailId === fi.id ? null : fi.id)} className="text-xs text-[var(--accent)]"
+                    aria-expanded={detailId === fi.id}>
                     {detailId === fi.id ? "Hide" : "View set"}
                   </button>
                 </td>
               </tr>
             ))}
-            {store.finalInvoices.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-[var(--muted)]">No shipments invoiced yet.</td></tr>}
+            {store.finalInvoices.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                No shipments invoiced yet — pick an open proforma above to raise the first.
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
 
       {detail && (
         <div className={card + " mt-6 p-6"}>
-          <p className="mb-5 font-serif text-lg">Document set — {detail.docNo}</p>
+          <p className="mb-5 font-display text-lg">Document set — {detail.docNo}</p>
           <div className="grid gap-4 md:grid-cols-3">
             <div className={panel + " p-4 text-sm"}>
-              <p className="font-mono text-xs text-[var(--accent)]">{detail.taxDocNo}</p>
+              <p className="font-num text-xs text-[var(--accent)]">{detail.taxDocNo}</p>
               <p className="mb-2 text-xs uppercase tracking-wider text-[var(--faint)]">Tax invoice · INR</p>
               <p className="text-[var(--muted)]">Consignee {detail.taxInvoice.consignee}</p>
-              <p className="text-[var(--muted)]">Total {fmtNum(detail.taxInvoice.total)} · GST {fmtNum(detail.taxInvoice.gst)}</p>
-              <p className="mt-1 font-medium">{fmtNum(detail.taxInvoice.grandTotal)}</p>
-              <p className="mt-1 text-xs italic text-[var(--muted)]">{detail.taxInvoice.amountInWords} only</p>
+              <p className="text-[var(--muted)]">Total <span className="font-num">{fmtMoney(detail.taxInvoice.total, "INR")}</span> · GST <span className="font-num">{fmtMoney(detail.taxInvoice.gst, "INR")}</span></p>
+              <p className="mt-1 font-medium font-num">{fmtMoney(detail.taxInvoice.grandTotal, "INR")}</p>
+              <p className="mt-1 text-xs italic text-[var(--muted)]">{amountInWords(detail.taxInvoice.grandTotal, "INR")}</p>
             </div>
             <div className={panel + " p-4 text-sm"}>
-              <p className="font-mono text-xs text-[var(--accent)]">{detail.commercialDocNo}</p>
+              <p className="font-num text-xs text-[var(--accent)]">{detail.commercialDocNo}</p>
               <p className="mb-2 text-xs uppercase tracking-wider text-[var(--faint)]">Commercial · {detail.commercialInvoice.currency}</p>
               <p className="text-[var(--muted)]">Consignee {detail.commercialInvoice.consignee}</p>
-              <p className="text-[var(--muted)]">Incoterm {detail.incoterm}</p>
-              <p className="mt-1 font-medium">{fmtMoney(detail.commercialInvoice.total, detail.commercialInvoice.currency)}</p>
+              <p className="text-[var(--muted)]">Incoterm {detail.incoterm} · rate ₹{fmtNum(detail.exchangeRate)}</p>
+              <p className="mt-1 font-medium font-num">{fmtMoney(detail.commercialInvoice.total, detail.commercialInvoice.currency)}</p>
             </div>
             <div className={panel + " p-4 text-sm"}>
               <p className="mb-2 text-xs uppercase tracking-wider text-[var(--faint)]">Packing list</p>
               <p className="text-[var(--muted)]">Container {detail.containerNo || "—"} · seal {detail.lineSeal || "—"}</p>
-              <p className="text-[var(--muted)]">{detail.packingList.totalBoxes} boxes · {detail.packingList.totalPacks} nos</p>
-              <p className="text-[var(--muted)]">Net {fmtNum(detail.packingList.netWeight, 3)} kg · Gross {fmtNum(detail.packingList.grossWeight, 3)} kg</p>
+              <p className="text-[var(--muted)]"><span className="font-num">{detail.packingList.totalBoxes}</span> boxes · <span className="font-num">{detail.packingList.totalPacks}</span> units</p>
+              <p className="text-[var(--muted)]">Net <span className="font-num">{fmtNum(detail.packingList.netWeight, 3)}</span> kg · Gross <span className="font-num">{fmtNum(detail.packingList.grossWeight, 3)}</span> kg</p>
             </div>
           </div>
           <p className="mt-4 text-xs text-[var(--muted)]">
-            Bank details as they stood when this set was generated: {detail.company ? `${detail.company.bankName}, A/C ${detail.company.accountNo}` : "—"}.
+            Bank details as they stood when this set was generated: {detail.company && detail.company.bankName ? `${detail.company.bankName}, A/C ${detail.company.accountNo}` : "not recorded"}.
           </p>
         </div>
       )}
@@ -1703,7 +1651,6 @@ function ShipmentsPage() {
   );
 }
 
-/* ----------------------------------------------------------- analytics */
 function AnalyticsPage() {
   return (
     <div>
@@ -1719,26 +1666,34 @@ function AnalyticsPage() {
 
 /* ------------------------------------------------------------- company */
 function CompanyPage() {
-  const { store, refresh, audit } = useApp();
+  const { store, refresh } = useApp();
   const [draft, setDraft] = useState(store.company);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [busy, setBusy] = useState(false);
   const dirty = COMPANY_KEYS.some((k) => (draft[k] || "") !== (store.company[k] || ""));
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+
+  // A colleague's save arrives live; adopt it unless this screen has unsaved edits.
+  useEffect(() => { if (!dirtyRef.current) setDraft(store.company); }, [store.company]);
+
   const set = (k, v) => { setDraft({ ...draft, [k]: v }); setSaved(false); };
 
   const save = async () => {
-    setSaveError("");
-    const changes = diffObject(store.company, draft, COMPANY_KEYS);
-    const { error } = await sb.from("company_profile").update(companyToRow(draft)).eq("id", 1);
-    if (error) { setSaveError(error.message); return; }
-    audit("Company profile edited", changes.length ? changes.join("; ") : "no field changes");
-    await refresh();
-    setSaved(true);
+    setBusy(true);
+    const message = await attempt(async () => {
+      await call("save_company", { p: pick(draft, COMPANY_KEYS) });
+      await refresh();
+    });
+    setBusy(false);
+    setSaveError(message);
+    if (!message) setSaved(true);
   };
 
   return (
     <div>
-      <PageHead title="Company profile" blurb="Registered details and bank particulars. These feed the header and bank block on every proforma and invoice at the moment it is created." />
+      <PageHead title="Company profile" blurb="Registered details and bank particulars. These are copied onto every shipment's invoices at the moment the shipment is created — later edits never change a document already issued." />
       <div className={card + " max-w-3xl p-6"}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Company name" className="md:col-span-2"><input className={input} value={draft.name} onChange={(e) => set("name", e.target.value)} /></Field>
@@ -1750,10 +1705,10 @@ function CompanyPage() {
           <Field label="GST no."><input className={input} value={draft.gstNo} onChange={(e) => set("gstNo", e.target.value)} /></Field>
           <Field label="IEC code"><input className={input} value={draft.iecCode} onChange={(e) => set("iecCode", e.target.value)} /></Field>
         </div>
-        <div className="mt-6 flex items-center justify-end gap-4">
+        <div className="mt-6 flex items-center justify-end gap-4" aria-live="polite">
           {saveError && <span className={errText}>{saveError}</span>}
-          {saved && !dirty && <span className="flex items-center gap-1 text-xs text-emerald-400"><Check className="h-3.5 w-3.5" /> Saved</span>}
-          <button disabled={!dirty} className={btn} onClick={save}>Save changes</button>
+          {saved && !dirty && <span className="flex items-center gap-1 text-xs text-[var(--status-ok)]"><Check className="h-3.5 w-3.5" /> Saved</span>}
+          <button disabled={!dirty || busy} className={btn} onClick={save}>{busy ? "Saving…" : "Save changes"}</button>
         </div>
       </div>
     </div>
@@ -1761,50 +1716,80 @@ function CompanyPage() {
 }
 
 /* --------------------------------------------------------------- users */
+// A password a person can read out over the phone: no look-alike characters.
+function generatePassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = new Uint32Array(14);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+}
+
 function UsersPage() {
-  const { store, refresh, user, audit } = useApp();
-  const [error, setError] = useState("");
+  const { store, refresh, user } = useApp();
+  const blank = { name: "", email: "", password: "", role: "staff", access: { documents: false, parties: false, company: false } };
+  const [form, setForm] = useState(blank);
+  const [showPassword, setShowPassword] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [pageError, setPageError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState(null);
+  const [passwordFor, setPasswordFor] = useState(null);     // { id, email, value }
   const [auditFilter, setAuditFilter] = useState("");
   const [showAudit, setShowAudit] = useState(false);
 
-  // Accounts are created by the person themselves at the sign-in screen.
-  // Admins never handle anyone's password — they grant sections afterwards.
-  const patchProfile = async (u, patch, action, detail) => {
-    setError("");
-    const { error: err } = await sb.from("profiles").update(patch).eq("id", u.id);
-    if (err) { setError(err.message); return; }
-    if (action) audit(action, detail);
-    await refresh();
+  const set = (k, v) => { setForm({ ...form, [k]: v }); setFormError(""); };
+
+  const createUser = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) return setFormError("Name is required.");
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) return setFormError("Enter a valid email address.");
+    if (form.password.length < 8) return setFormError("The password must be at least 8 characters.");
+    setBusy(true);
+    const message = await attempt(async () => {
+      await adminApi("create", {
+        email: form.email.trim(), password: form.password, full_name: form.name.trim(),
+        role: form.role, access: form.access,
+      });
+      await refresh();
+    });
+    setBusy(false);
+    if (message) return setFormError(message);
+    setCreated({ email: form.email.trim(), password: form.password });
+    setForm(blank); setShowPassword(false);
   };
 
-  const toggleAccess = (u, key) => {
-    if (u.role === "admin") return;
-    const column = { documents: "access_documents", parties: "access_parties", company: "access_company" }[key];
-    const next = !(u.access || {})[key];
-    patchProfile(u, { [column]: next }, "Access changed", `${u.email} — ${key} ${next ? "granted" : "revoked"}`);
+  const change = async (u, patch) => {
+    const message = await attempt(async () => {
+      await call("set_user_access", { p_user: u.id, p: patch });
+      await refresh();
+    });
+    setPageError(message);
   };
 
-  const setRole = (u, role) => {
-    const grantAll = role === "admin";
-    patchProfile(
-      u,
-      grantAll
-        ? { role, access_documents: true, access_parties: true, access_company: true }
-        : { role },
-      "Role changed",
-      `${u.email} — now ${role}`
-    );
+  const savePassword = async () => {
+    if (passwordFor.value.length < 8) return setPageError("The password must be at least 8 characters.");
+    const message = await attempt(() => adminApi("set_password", { user_id: passwordFor.id, password: passwordFor.value }));
+    setPageError(message);
+    if (!message) { setCreated({ email: passwordFor.email, password: passwordFor.value, reset: true }); setPasswordFor(null); refresh(); }
   };
 
-  const exportBackup = () => {
-    const blob = new Blob([JSON.stringify(store, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `das-superfoods-export-${todayISO()}.json`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    audit("Data exported", "");
-  };
+  const accessText = (u) => (u.role === "admin" ? "All sections"
+    : ACCESS_KEYS.filter((a) => (u.access || {})[a.key]).map((a) => a.label).join(", ") || "None");
+
+  const userColumns = [
+    { label: "Name", value: (u) => u.name, width: 26 },
+    { label: "Email", value: (u) => u.email, width: 32 },
+    { label: "Role", value: (u) => u.role, width: 10 },
+    { label: "Section access", value: accessText, width: 40 },
+    { label: "Status", value: (u) => (u.active ? "Active" : "Deactivated"), width: 14 },
+    { label: "Last sign-in", value: (u) => (u.lastLogin ? fmtWhen(u.lastLogin) : "never") },
+  ];
+  const auditColumns = [
+    { label: "When (IST)", value: (a) => fmtWhen(a.at), width: 20 },
+    { label: "User", value: (a) => a.user, width: 30 },
+    { label: "Action", value: (a) => a.action, width: 26 },
+    { label: "Detail", value: (a) => a.detail, width: 60 },
+  ];
 
   const filteredAudit = store.audit.filter((a) =>
     !auditFilter || (a.action + " " + a.user + " " + (a.detail || "")).toLowerCase().includes(auditFilter.toLowerCase()));
@@ -1813,20 +1798,63 @@ function UsersPage() {
     <div>
       <PageHead
         title="Users & access"
-        blurb="One core Admin role plus per-section grants. Staff register themselves and arrive with no access at all — you decide what each of them can reach. Party master and Company profile stay hidden without a grant, and every change lands in the audit log."
+        blurb="One core Admin role plus custom access profiles. Staff see only the sections they're granted — Party master and Company profile stay hidden without access. Every change lands in the audit log."
       />
 
-      <div className={card + " mb-6 p-5"}>
-        <p className="text-sm font-medium">How people join</p>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--muted)]">
-          Send them this address and ask them to pick <span className="text-[var(--text)]">Create account</span> with their own
-          work email and a password only they know. They will appear in the table below with nothing ticked. Nobody shares a
-          login, and nobody — including you — can see anyone else's password.
-        </p>
-      </div>
+      <form onSubmit={createUser} className={card + " mb-6 p-6"}>
+        <p className="mb-5 text-sm font-medium">Add a user</p>
+        <div className="grid gap-5 lg:grid-cols-[1fr_1fr_1fr_1fr]">
+          <Field label="Name"><input className={input} value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
+          <Field label="Email"><input type="email" className={input} value={form.email} autoComplete="off" onChange={(e) => set("email", e.target.value)} /></Field>
+          <Field label="Password" hint="At least 8 characters">
+            <span className="flex gap-2">
+              <input type={showPassword ? "text" : "password"} className={input} value={form.password} autoComplete="new-password"
+                onChange={(e) => set("password", e.target.value)} />
+              <button type="button" className={btnGhost + " shrink-0"} onClick={() => { set("password", generatePassword()); setShowPassword(true); }}>Generate</button>
+            </span>
+          </Field>
+          <Field label="Role">
+            <select className={input} value={form.role} onChange={(e) => set("role", e.target.value)}>
+              <option value="staff">Staff (custom access)</option>
+              <option value="admin">Admin (full access)</option>
+            </select>
+          </Field>
+        </div>
+        <fieldset className="mt-5">
+          <legend className={label}>Section access</legend>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            {ACCESS_KEYS.map((a) => (
+              <label key={a.key} className="flex items-center gap-2 text-sm text-[var(--muted)]" title={a.note}>
+                <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" disabled={form.role === "admin"}
+                  checked={form.role === "admin" ? true : form.access[a.key]}
+                  onChange={() => set("access", { ...form.access, [a.key]: !form.access[a.key] })} />
+                {a.label} <span className="text-xs text-[var(--faint)]">— {a.note}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div className="mt-5 flex items-center justify-between">
+          <span aria-live="polite" className={errText}>{formError}</span>
+          <button type="submit" disabled={busy} className={btn}>{busy ? "Creating…" : "Create user"}</button>
+        </div>
+      </form>
 
-      {error && <p className={errText + " mb-4"}>{error}</p>}
+      {created && (
+        <div role="status" className={card + " mb-6 flex items-start justify-between gap-4 border-[var(--accent)]/40 p-5"}>
+          <div>
+            <p className="text-sm font-medium">{created.reset ? "Password updated for" : "Account created for"} {created.email}</p>
+            <p className="mt-1 font-num text-lg text-[var(--accent)]">{created.password}</p>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Shown once. Pass it on in person or by phone — not by email or chat — and ask them to change it from the key icon in the header after signing in.
+            </p>
+          </div>
+          <button onClick={() => setCreated(null)} aria-label="Dismiss"><X className="h-4 w-4 text-[var(--muted)]" /></button>
+        </div>
+      )}
 
+      <div aria-live="polite">{pageError && <p className={errText + " mb-4"}>{pageError}</p>}</div>
+
+      <div className="mb-3 flex justify-end"><ExcelButton name="users" columns={userColumns} rows={store.users} /></div>
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
           <thead className="bg-[var(--panel)]">
@@ -1837,80 +1865,107 @@ function UsersPage() {
           </thead>
           <tbody>
             {store.users.map((u) => (
-              <tr key={u.id} className="border-t border-[var(--line)]">
+              <tr key={u.id} className="border-t border-[var(--line)] align-top">
                 <td className={td + " font-medium"}>{u.name}{u.id === user.id && <span className="ml-2 text-xs text-[var(--muted)]">you</span>}</td>
                 <td className={td + " text-[var(--muted)]"}>{u.email}</td>
-                <td className={td}>{u.role === "admin" ? <Chip tone="accent">Admin</Chip> : <Chip>Staff</Chip>}</td>
+                <td className={td}>
+                  {u.role === "admin" ? <Chip tone="accent">Admin</Chip> : <Chip>Staff</Chip>}
+                  {!u.active && <span className="ml-2"><Chip tone="off">Deactivated</Chip></span>}
+                </td>
                 <td className={td}>
                   {u.role === "admin" ? <span className="text-xs text-[var(--muted)]">All sections</span> : (
                     <span className="flex flex-wrap gap-1.5">
-                      {ACCESS_KEYS.map((a) => (
-                        <button key={a.key} onClick={() => toggleAccess(u, a.key)} title={"Toggle " + a.label}>
-                          <Chip tone={(u.access || {})[a.key] ? "ok" : "off"}>{a.label}</Chip>
-                        </button>
-                      ))}
+                      {ACCESS_KEYS.map((a) => {
+                        const on = Boolean((u.access || {})[a.key]);
+                        return (
+                          <button key={a.key} onClick={() => change(u, { [a.key]: !on })} aria-pressed={on}
+                            title={(on ? "Revoke " : "Grant ") + a.label}>
+                            <Chip tone={on ? "ok" : "off"}>{a.label}</Chip>
+                          </button>
+                        );
+                      })}
                     </span>
                   )}
                 </td>
                 <td className={td + " text-xs text-[var(--muted)]"}>{u.lastLogin ? fmtWhen(u.lastLogin) : "never"}</td>
                 <td className={td + " text-right"}>
-                  <span className="flex items-center justify-end gap-4">
-                    {u.id !== user.id && (
-                      <React.Fragment>
-                        <button onClick={() => setRole(u, u.role === "admin" ? "staff" : "admin")}
-                          className="text-xs text-[var(--muted)] hover:text-[var(--text)]">
-                          {u.role === "admin" ? "Make staff" : "Make admin"}
-                        </button>
-                        <button onClick={() => patchProfile(u, { active: !u.active }, u.active ? "User deactivated" : "User reactivated", u.email)}
-                          className="text-xs text-[var(--muted)] hover:text-[var(--danger)]">
-                          {u.active ? "Deactivate" : "Reactivate"}
-                        </button>
-                      </React.Fragment>
-                    )}
-                    {!u.active && <Chip tone="off">Inactive</Chip>}
-                  </span>
+                  {passwordFor && passwordFor.id === u.id ? (
+                    <span className="flex items-center justify-end gap-2">
+                      <input type="text" aria-label={"New password for " + u.email} className={input + " w-44"} value={passwordFor.value}
+                        onChange={(e) => setPasswordFor({ ...passwordFor, value: e.target.value })} />
+                      <button onClick={() => setPasswordFor({ ...passwordFor, value: generatePassword() })} className="text-xs text-[var(--muted)]">Generate</button>
+                      <button onClick={savePassword} className="text-xs text-[var(--accent)]">Save</button>
+                      <button onClick={() => setPasswordFor(null)} className="text-xs text-[var(--muted)]">Cancel</button>
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-end gap-4">
+                      <button onClick={() => { setPageError(""); setPasswordFor({ id: u.id, email: u.email, value: "" }); }}
+                        className="flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--text)]">
+                        <KeyRound className="h-3 w-3" /> Set password
+                      </button>
+                      {u.id !== user.id && (
+                        <React.Fragment>
+                          <button onClick={() => change(u, { role: u.role === "admin" ? "staff" : "admin" })}
+                            className="text-xs text-[var(--muted)] hover:text-[var(--text)]">
+                            {u.role === "admin" ? "Make staff" : "Make admin"}
+                          </button>
+                          <button onClick={() => change(u, { active: !u.active })}
+                            className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">
+                            {u.active ? "Deactivate" : "Reactivate"}
+                          </button>
+                        </React.Fragment>
+                      )}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
-            {store.users.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--muted)]">Nobody has registered yet.</td></tr>}
+            {store.users.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--muted)]">No accounts yet — add the first one above.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
 
       <p className="mt-4 max-w-4xl text-xs leading-relaxed text-[var(--muted)]">
-        Note: staff need the Documents grant to work with quotations, proforma invoices and shipments. Deactivating someone
-        blocks their sign-in immediately without deleting anything they created. Forgotten passwords are handled by the
-        person themselves through <span className="text-[var(--text)]">Forgotten your password?</span> on the sign-in screen.
+        Note: staff need the Documents permission to work with quotations, proforma invoices and shipments. Deactivating
+        blocks an account at once without removing anything it created — accounts are never deleted, so the audit trail
+        always has a name behind it.
       </p>
 
       <div className="mt-8 flex items-center gap-3">
-        <button onClick={() => setShowAudit(!showAudit)} className={btnGhost + " flex items-center gap-1.5"}>
-          <History className="h-4 w-4" /> {showAudit ? "Hide" : "Show"} audit log ({store.audit.length})
+        <button onClick={() => setShowAudit(!showAudit)} aria-expanded={showAudit} className={btnGhost + " flex items-center gap-1.5"}>
+          <History className="h-4 w-4" /> {showAudit ? "Hide" : "Show"} audit log
         </button>
-        <button onClick={exportBackup} className={btnGhost + " flex items-center gap-1.5"}>
-          <Download className="h-4 w-4" /> Export a snapshot
-        </button>
+        <ExcelButton name="audit-log" columns={auditColumns} rows={filteredAudit} />
       </div>
 
       {showAudit && (
         <div className="mt-5">
-          <input className={input + " mb-3 max-w-sm"} placeholder="Filter by user, action or detail"
-            value={auditFilter} onChange={(e) => setAuditFilter(e.target.value)} />
+          <div className="mb-3 flex items-center gap-3">
+            <input className={input + " max-w-sm"} placeholder="Filter by user, action or detail" aria-label="Filter the audit log"
+              value={auditFilter} onChange={(e) => setAuditFilter(e.target.value)} />
+            <span className="text-xs text-[var(--muted)]">Newest {store.audit.length} events. The log is append-only: no one can edit or remove an entry.</span>
+          </div>
           <div className={card + " overflow-hidden"}>
             <table className="w-full">
               <thead className="bg-[var(--panel)]">
-                <tr><th className={th}>When</th><th className={th}>User</th><th className={th}>Action</th><th className={th}>Detail</th></tr>
+                <tr><th className={th}>When (IST)</th><th className={th}>User</th><th className={th}>Action</th><th className={th}>Detail</th></tr>
               </thead>
               <tbody>
-                {filteredAudit.slice(0, 100).map((a) => (
+                {filteredAudit.slice(0, 150).map((a) => (
                   <tr key={a.id} className="border-t border-[var(--line)] align-top">
-                    <td className={td + " w-44 text-xs text-[var(--muted)]"}>{fmtWhen(a.at)}</td>
-                    <td className={td + " w-56 font-mono text-xs text-[var(--muted)]"}>{a.user}</td>
+                    <td className={td + " w-40 font-num text-xs text-[var(--muted)]"}>{fmtWhen(a.at)}</td>
+                    <td className={td + " w-56 text-xs text-[var(--muted)]"}>{a.user}</td>
                     <td className={td + " w-56"}>{a.action}</td>
                     <td className={td + " text-xs text-[var(--muted)]"}>{a.detail}</td>
                   </tr>
                 ))}
-                {filteredAudit.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-[var(--muted)]">Nothing logged yet.</td></tr>}
+                {filteredAudit.length === 0 && (
+                  <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+                    {auditFilter ? "Nothing matches that filter." : "Nothing has been logged yet."}
+                  </td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -1920,5 +1975,11 @@ function UsersPage() {
   );
 }
 
-/* ------------------------------------------------------------------ boot */
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+export default App;
+
+// Exported for tests/render.test.jsx, which draws every screen against sample data.
+export {
+  AppCtx, SignIn, Overview, PartiesPage, PartyForm, QuotationsPage, QuotationForm, QuotationDocument,
+  ProformaPage, ProformaForm, ShipmentsPage, ShipmentForm, AnalyticsPage, CompanyPage, UsersPage,
+  ChangePasswordDialog, CommandPalette,
+};
