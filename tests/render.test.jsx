@@ -43,8 +43,8 @@ const shipment = {
   packingList: { totalBoxes: 1200, totalPacks: 14400, netWeight: 420, grossWeight: 492, grandTotal: 912 },
   company: { name: "Das Superfoods Pvt. Ltd.", bankName: "HDFC Bank", accountNo: "5020" }, items: [line],
 };
-const admin = { id: "u1", name: "Sai Admin", email: "docs.export@dasfoodindia.com", role: "admin", active: true, access: { documents: true, parties: true, company: true }, lastLogin: "2026-10-03T05:10:10Z" };
-const staff = { id: "u2", name: "Ecom Staff", email: "ecom02@pintola.in", role: "staff", active: true, access: { documents: true, parties: false, company: false }, lastLogin: null };
+const admin = { id: "u1", name: "Sai Admin", email: "docs.export@dasfoodindia.com", role: "admin", active: true, sections: ["overview", "parties", "quotations", "proforma", "shipments", "analytics", "company", "users"], lastLogin: "2026-10-03T05:10:10Z" };
+const staff = { id: "u2", name: "Ecom Staff", email: "ecom02@pintola.in", role: "staff", active: true, sections: ["overview", "quotations"], lastLogin: null };
 
 const fullStore = () => ({
   ...emptyStore(),
@@ -58,7 +58,7 @@ const fullStore = () => ({
 const ctxFor = (user, store) => ({
   store, user, loading: false, refresh: async () => {},
   isAdmin: user.role === "admin",
-  can: (needs) => !needs || user.role === "admin" || Boolean(user.access[needs]),
+  can: (section) => user.role === "admin" || user.sections.includes(section),
 });
 const draw = (node, user = admin, store = fullStore()) =>
   renderToString(<AppCtx.Provider value={ctxFor(user, store)}>{node}</AppCtx.Provider>);
@@ -122,10 +122,23 @@ describe("every screen renders", () => {
     expect(draw(<CompanyPage />)).toContain("HDFC0000123");
   });
 
-  it("users — add-a-user form with a password, and Set password on each row", () => {
+  it("users — an admin gets the add-a-user form, all eight tick-boxes, and the row actions", () => {
     const html = draw(<UsersPage />);
-    for (const s of ["Add a user", "Password", "Generate", "Create user", "Set password", "ecom02@pintola.in", "Deactivate", "Excel"]) {
+    for (const s of ["Add a user", "Password", "Generate", "Create user", "Set password", "ecom02@pintola.in", "Deactivate", "Excel", "Tick all"]) {
       expect(html).toContain(s);
+    }
+    for (const s of ["Overview", "Parties", "Quotations", "Proforma", "Shipments", "Analytics", "Company", "Users"]) {
+      expect(html, `tick-box for ${s}`).toContain(s);
+    }
+  });
+
+  it("users — the users grant can look but not change: no form, no actions", () => {
+    const viewer = { ...staff, sections: ["users"] };
+    const html = draw(<UsersPage />, viewer);
+    expect(html).toContain("needs an administrator");
+    expect(html).toContain("ecom02@pintola.in");
+    for (const s of ["Add a user", "Create user", "Set password", "Deactivate", "Make admin", "Tick all"]) {
+      expect(html, `a non-admin must not be offered "${s}"`).not.toContain(s);
     }
   });
 });
@@ -142,11 +155,23 @@ describe("an empty database renders too, with an empty state that says what to d
   });
 });
 
-describe("staff see their own scope", () => {
-  it("overview hides the party count from someone without the party grant", () => {
-    const store = { ...fullStore(), parties: [], users: [staff], audit: [] };
-    const html = draw(<Overview onNavigate={() => {}} />, staff, store);
-    expect(html).not.toContain("Parties on file");
-    expect(html).not.toContain("Recent activity");
+describe("the overview never reveals a section the account does not hold", () => {
+  const only = (sections) => ({ ...staff, sections });
+  it("quotations only: the quotation count, nothing about parties, proformas or shipments", () => {
+    const html = draw(<Overview onNavigate={() => {}} />, only(["overview", "quotations"]));
+    expect(html).toContain("Quotations");
+    for (const s of ["Parties on file", "Open proforma", "Shipments invoiced", "Awaiting shipment", "Recent activity"]) {
+      expect(html).not.toContain(s);
+    }
+  });
+  it("proforma without shipments: sees what is awaiting shipment, but no link into Shipments", () => {
+    const html = draw(<Overview onNavigate={() => {}} />, only(["overview", "proforma"]));
+    expect(html).toContain("Awaiting shipment");
+    expect(html).not.toContain("Go to shipments");
+    expect(html).not.toContain("Shipments invoiced");
+  });
+  it("recent activity needs the users grant", () => {
+    expect(draw(<Overview onNavigate={() => {}} />, only(["overview"]))).not.toContain("Recent activity");
+    expect(draw(<Overview onNavigate={() => {}} />, only(["overview", "users"]))).toContain("Recent activity");
   });
 });

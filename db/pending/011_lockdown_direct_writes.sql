@@ -1,10 +1,10 @@
--- db/010 — PENDING. Do not run until the RPC-only client is live on production.
+-- db/011 — PENDING. Do not run until the RPC-only client is live on production.
 --
 -- Why it waits: the client on production today (commit 0aab035) still writes
 -- straight into the tables and inserts its own audit rows. This migration
 -- removes exactly those paths, so running it early would break the live site.
 -- The order is: promote branch lockdown-wave-1 → confirm the live site works →
--- move this file up to db/, bump EXPECTED_MIGRATION to 10 in the same commit,
+-- move this file up to db/, bump EXPECTED_MIGRATION to 11 in the same commit,
 -- then apply it.
 --
 -- What it does: after this, the ONLY way to change data is a definer RPC that
@@ -41,7 +41,7 @@ begin
   where not exists (
     select 1 from pg_policies p
     where p.schemaname = 'public' and p.tablename = t and p.cmd = 'SELECT');
-  if missing is not null then raise exception 'db/010: no SELECT policy left on: %', missing; end if;
+  if missing is not null then raise exception 'db/011: no SELECT policy left on: %', missing; end if;
 end $$;
 
 -- 4. Number allocation is no longer a client call: the create RPCs allocate
@@ -56,14 +56,14 @@ begin
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind = 'r'
     and has_table_privilege('authenticated', c.oid, 'insert,update,delete,truncate');
-  if bad is not null then raise exception 'db/010: authenticated can still write directly to: %', bad; end if;
+  if bad is not null then raise exception 'db/011: authenticated can still write directly to: %', bad; end if;
 
   if has_function_privilege('authenticated', 'public.next_doc_no(text)', 'execute') then
-    raise exception 'db/010: next_doc_no is still callable by authenticated';
+    raise exception 'db/011: next_doc_no is still callable by authenticated';
   end if;
 end $$;
 
 insert into public.app_schema_migrations (id, name)
-values (10, 'lockdown_direct_writes') on conflict (id) do nothing;
+values (11, 'lockdown_direct_writes') on conflict (id) do nothing;
 
-select 'db/010 ✓ tables are read-only to clients; every write is an RPC' as status;
+select 'db/011 ✓ tables are read-only to clients; every write is an RPC' as status;

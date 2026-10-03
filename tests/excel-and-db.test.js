@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { defang, buildSheetData } from "../src/lib/excel.js";
-import { humanise, accessOf, quotationFromRow } from "../src/lib/db.js";
+import { humanise, accessOf, quotationFromRow, SECTION_KEYS } from "../src/lib/db.js";
 
 describe("Excel export", () => {
   it("defangs text that Excel would run as a formula", () => {
@@ -39,19 +39,30 @@ describe("errors are human and diagnosable", () => {
 });
 
 describe("client access mirrors public.has_access() and fails closed", () => {
-  const profile = (over) => ({ role: "staff", active: true, access: { documents: true, parties: false, company: false }, ...over });
-  const NOTHING = { isAdmin: false, documents: false, parties: false, company: false };
-  it("grants only what is ticked", () => {
-    expect(accessOf(profile())).toEqual({ isAdmin: false, documents: true, parties: false, company: false });
+  const profile = (over) => ({ role: "staff", active: true, sections: ["quotations", "shipments"], ...over });
+  const none = Object.fromEntries(["isAdmin", ...SECTION_KEYS].map((k) => [k, false]));
+  it("grants exactly the sections that are ticked, and nothing else", () => {
+    expect(accessOf(profile())).toEqual({ ...none, quotations: true, shipments: true });
   });
-  it("gives an admin everything", () => {
-    expect(accessOf(profile({ role: "admin" }))).toEqual({ isAdmin: true, documents: true, parties: true, company: true });
+  it("holding quotations does not open proforma or parties", () => {
+    const can = accessOf(profile({ sections: ["quotations"] }));
+    expect([can.proforma, can.parties, can.company, can.users, can.overview]).toEqual([false, false, false, false, false]);
   });
-  it("gives a deactivated admin nothing", () => {
-    expect(accessOf(profile({ role: "admin", active: false }))).toEqual(NOTHING);
+  it("gives an admin every section whatever is stored", () => {
+    const can = accessOf(profile({ role: "admin", sections: [] }));
+    expect(SECTION_KEYS.every((k) => can[k])).toBe(true);
+    expect(can.isAdmin).toBe(true);
+  });
+  it("the users grant does not make someone an admin", () => {
+    const can = accessOf(profile({ sections: ["users"] }));
+    expect(can.users).toBe(true);
+    expect(can.isAdmin).toBe(false);
+  });
+  it("gives a deactivated account nothing, even an admin holding everything", () => {
+    expect(accessOf(profile({ role: "admin", active: false, sections: SECTION_KEYS }))).toEqual(none);
   });
   it("gives a missing profile nothing", () => {
-    expect(accessOf(null)).toEqual(NOTHING);
+    expect(accessOf(null)).toEqual(none);
   });
 });
 

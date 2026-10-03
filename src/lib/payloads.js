@@ -31,7 +31,7 @@ export const SHIPMENT_KEYS = [
 export const COMPANY_KEYS = [
   "name", "address", "bankName", "accountNo", "ifsc", "swift", "gstNo", "iecCode",
 ];
-export const USER_ACCESS_KEYS = ["role", "fullName", "active", "documents", "parties", "company"];
+export const USER_ACCESS_KEYS = ["role", "fullName", "active", "sections"];
 
 // Which function each list is sent to — used by the contract test.
 export const RPC_CONTRACT = {

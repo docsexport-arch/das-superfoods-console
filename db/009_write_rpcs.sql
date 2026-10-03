@@ -11,6 +11,17 @@
 -- Refusals leave as PT4xx classes with a human sentence; nothing here raises
 -- 40001/40P01, which PostgREST would retry for ever.
 
+-- SUPERSEDED IN PART by db/010 (per-section access). That migration rewrote the
+-- guards of save_quotation, delete_quotation, create_proforma and
+-- create_shipment, and replaced set_user_access. Re-running this file would put
+-- the old, wider guards back, so it refuses once db/010 is in the ledger.
+do $$
+begin
+  if exists (select 1 from public.app_schema_migrations where id >= 10) then
+    raise exception 'db/009 is superseded in part by db/010 and must not be re-run. A missing ledger row is fixed with an insert, not by replaying this file.';
+  end if;
+end $$;
+
 -- ------------------------------------------------------------ internals
 create or replace function public._fail(p_status int, p_message text)
 returns void language plpgsql set search_path = public

@@ -82,7 +82,11 @@ Deno.serve(async (req: Request) => {
     const password = String(body.password ?? "");
     const fullName = String(body.full_name ?? "").trim();
     const role = body.role === "admin" ? "admin" : "staff";
-    const access = (body.access ?? {}) as Record<string, boolean>;
+    const ALL = ["overview", "parties", "quotations", "proforma", "shipments", "analytics", "company", "users"];
+    const asked = Array.isArray(body.sections) ? body.sections.map(String) : [];
+    if (asked.some((s) => !ALL.includes(s))) return json({ error: "Unknown section in the list." }, 400);
+    // An admin always holds every section; staff hold exactly what was ticked.
+    const sections = role === "admin" ? ALL : ALL.filter((s) => asked.includes(s));
 
     if (!/^\S+@\S+\.\S+$/.test(email)) return json({ error: "Enter a valid email address." }, 400);
     if (password.length < 8) return json({ error: "The password must be at least 8 characters." }, 400);
@@ -101,20 +105,17 @@ Deno.serve(async (req: Request) => {
       return json({ error: msg }, 400);
     }
 
-    const grantAll = role === "admin";
     const { error: profErr } = await admin.from("profiles").update({
       full_name: fullName,
       email,
       role,
-      access_documents: grantAll || Boolean(access.documents),
-      access_parties: grantAll || Boolean(access.parties),
-      access_company: grantAll || Boolean(access.company),
+      sections,
     }).eq("id", created.user.id);
     if (profErr) {
       return json({ error: "The account was created but its access could not be set. Set it from the Users list." }, 500);
     }
 
-    await log("User created", created.user.id, `${email} — ${role}`);
+    await log("User created", created.user.id, `${email} — ${role} — ${sections.join(", ") || "no sections"}`);
     return json({ ok: true, id: created.user.id, email });
   }
 

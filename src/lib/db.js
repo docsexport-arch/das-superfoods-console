@@ -143,7 +143,7 @@ export const companyFromRow = (r) => ({
 
 export const userFromRow = (r) => ({
   id: r.id, name: r.full_name || r.email, email: r.email, role: r.role,
-  access: { documents: r.access_documents, parties: r.access_parties, company: r.access_company },
+  sections: r.sections || [],
   active: r.active, createdAt: r.created_at, lastLogin: r.last_login,
 });
 
@@ -159,18 +159,24 @@ export const emptyStore = () => ({
   parties: [], quotations: [], pis: [], finalInvoices: [], audit: [], migrationIds: [],
 });
 
+// One grant per toolbar section. This list is the client half of the check
+// constraint profiles_sections_valid and of public.has_access() (db/010) —
+// change all three in the same commit.
+export const SECTION_KEYS = [
+  "overview", "parties", "quotations", "proforma", "shipments", "analytics", "company", "users",
+];
+
 // The single source for "who may see what" on the client. It mirrors
 // public.has_access() / public.is_admin() in the database, which is the real
-// gate; this only decides what to ask for and what to draw.
+// gate; this only decides what to ask for and what to draw. Like the database,
+// it fails closed: a deactivated or missing profile holds nothing.
 export function accessOf(profile) {
-  const isAdmin = Boolean(profile) && profile.role === "admin" && profile.active;
-  const live = Boolean(profile) && profile.active;
-  return {
-    isAdmin,
-    documents: live && (isAdmin || profile.access.documents),
-    parties: live && (isAdmin || profile.access.parties),
-    company: live && (isAdmin || profile.access.company),
-  };
+  const live = Boolean(profile) && Boolean(profile.active);
+  const isAdmin = live && profile.role === "admin";
+  const held = new Set(live ? profile.sections || [] : []);
+  const out = { isAdmin };
+  for (const key of SECTION_KEYS) out[key] = isAdmin || held.has(key);
+  return out;
 }
 
 const NEWEST_FIRST = [["created_at", false], ["id", true]];
@@ -194,11 +200,16 @@ export async function fetchStore(profile) {
     })());
   }
 
-  if (can.documents) {
+  if (can.quotations) {
     jobs.push(readAll("quotations", { order: NEWEST_FIRST, liveOnly: true })
       .then((rows) => { out.quotations = rows.map(quotationFromRow); }));
+  }
+  // A shipment is raised against a proforma, so the shipments grant reads them too.
+  if (can.proforma || can.shipments) {
     jobs.push(readAll("proformas", { order: NEWEST_FIRST, liveOnly: true })
       .then((rows) => { out.pis = rows.map(proformaFromRow); }));
+  }
+  if (can.shipments) {
     jobs.push(readAll("shipments", { order: NEWEST_FIRST, liveOnly: true })
       .then((rows) => { out.finalInvoices = rows.map(shipmentFromRow); }));
   }
@@ -211,11 +222,12 @@ export async function fetchStore(profile) {
     })());
   }
 
-  // Admins see every account; everyone else only their own row (RLS agrees).
+  // Admins and the users grant see every account; everyone else only their own
+  // row. The same query serves both — row-level security decides what comes back.
   jobs.push(readAll("profiles", { order: [["created_at", true], ["id", true]] })
     .then((rows) => { out.users = rows.map(userFromRow); }));
 
-  if (can.isAdmin) {
+  if (can.users) {
     jobs.push((async () => {
       // Bounded on purpose: the newest 300 events. The full trail stays in the database.
       const { data, error } = await withTimeout(
@@ -223,6 +235,10 @@ export async function fetchStore(profile) {
       if (error) throw new AppError(`Could not load the audit log: ${humanise(error)}`, error.code);
       out.audit = (data || []).map(auditFromRow);
     })());
+  }
+
+  // The migration ledger drives the drift banner, which only an admin is shown.
+  if (can.isAdmin) {
     jobs.push(readAll("app_schema_migrations", { order: [["id", true]] })
       .then((rows) => { out.migrationIds = rows.map((r) => r.id); }));
   }

@@ -61,13 +61,19 @@ https://das-superfoods-console.vercel.app · repo `docsexport-arch/das-superfood
 - **A failed read throws.** It is shown as an error, never as an empty table.
 - **Every table has an Excel export**; quantities show boxes **and** units.
 
-## Roles
+## Roles and access
 
-`admin` sees everything. `staff` get any of three grants — `documents`
-(quotations, proformas, shipments), `parties`, `company`. The database
-functions `public.is_admin()` / `public.has_access(section)` are the gate and
-both check `active`; `accessOf()` in `db.js` mirrors them for drawing the nav.
-Change the two together.
+`admin` holds everything. `staff` hold any of eight grants, one per toolbar
+section — `overview`, `parties`, `quotations`, `proforma`, `shipments`,
+`analytics`, `company`, `users` (decisions/006). The list lives in four places
+that a gate keeps identical: the check constraint `profiles_sections_valid`
+(db/010), `SECTION_KEYS` in `lib/db.js`, `SECTIONS` in `app.jsx`, and the
+`admin-users` function.
+
+`public.has_access(section)` / `public.is_admin()` are the gate — used by every
+RLS policy and inside every write function, and both check `active`.
+`accessOf()` in `db.js` mirrors them to decide what to draw. The `users` grant
+reads accounts and the audit log; only an admin can change them.
 
 ## Working loop
 

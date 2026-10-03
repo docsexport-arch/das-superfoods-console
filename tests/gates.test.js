@@ -6,6 +6,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EXPECTED_MIGRATION, computeMigrationDrift } from "../src/lib/migrations.js";
 import { RPC_CONTRACT } from "../src/lib/payloads.js";
+import { SECTION_KEYS } from "../src/lib/db.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...p) => readFileSync(join(ROOT, ...p), "utf8");
@@ -142,5 +143,39 @@ describe("client rules", () => {
   it("uses the publishable key, not a legacy JWT", () => {
     expect(code(join("src", "config.js"))).toMatch(/sb_publishable_/);
     for (const f of SRC) expect(code(f), f).not.toMatch(/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/);
+  });
+});
+
+describe("one list of sections, on every side", () => {
+  // Class: the grant list drifting between the database, the data layer, the
+  // screens and the account function — so the UI offers a tick-box the server
+  // rejects, or hides a section it allows. The latest constraint in db/ wins.
+  const quoted = (text) => [...text.matchAll(/["']([a-z]+)["']/g)].map((m) => m[1]);
+
+  const constraint = migrationFiles
+    .map((f) => sqlCode(f.name).match(/profiles_sections_valid\s+check \(sections <@ array\[([^\]]+)\]/))
+    .filter(Boolean).pop();
+
+  it("the database constraint is the reference", () => {
+    expect(constraint, "no profiles_sections_valid constraint found in db/").toBeTruthy();
+    expect(quoted(constraint[1])).toEqual(SECTION_KEYS);
+  });
+
+  it("the toolbar and tick-boxes in app.jsx list the same sections, in the same order", () => {
+    const block = read("src", "app.jsx").match(/const SECTIONS = \[([\s\S]*?)\n\];/);
+    expect(block, "SECTIONS not found in app.jsx").toBeTruthy();
+    expect([...block[1].matchAll(/key: "([a-z]+)"/g)].map((m) => m[1])).toEqual(SECTION_KEYS);
+  });
+
+  it("the account function accepts the same sections", () => {
+    const fn = read("supabase", "functions", "admin-users", "index.ts").match(/const ALL = \[([^\]]+)\]/);
+    expect(fn, "section list not found in the edge function").toBeTruthy();
+    expect(quoted(fn[1])).toEqual(SECTION_KEYS);
+  });
+
+  it("no client code still asks for the retired grants", () => {
+    for (const f of SRC) {
+      expect(read(f), f).not.toMatch(/access\.(documents|parties|company)|can\("documents"\)|access_documents/);
+    }
   });
 });

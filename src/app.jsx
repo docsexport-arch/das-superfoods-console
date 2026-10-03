@@ -23,25 +23,23 @@ import {
 const THEME_KEY = "das-superfoods-erp/theme";
 
 /* --------------------------------------------------------------- access */
-/* One core Admin role, plus staff accounts granted individual sections.
-   These names mirror public.has_access() in the database — change both in
-   the same commit. The database is the gate; this decides what to draw.   */
-const ACCESS_KEYS = [
-  { key: "documents", label: "Documents", note: "quotations, proforma invoices and shipments" },
-  { key: "parties", label: "Party master", note: "buyer, consignee, product and pricing records" },
-  { key: "company", label: "Company profile", note: "registered details and bank particulars" },
+/* Every toolbar section is its own grant. An account sees a section only if
+   it is ticked for that account; an admin always holds all of them.
+   The keys mirror SECTION_KEYS in lib/db.js and public.has_access() in the
+   database (db/010) — the database is the gate; this decides what to draw.
+   One list drives the toolbar, the tick-boxes and the Users table, so they
+   cannot drift apart.                                                      */
+const SECTIONS = [
+  { key: "overview", label: "Overview", note: "the home page" },
+  { key: "parties", label: "Parties", note: "buyer, consignee, product and pricing records" },
+  { key: "quotations", label: "Quotations", note: "create, edit and print quotations" },
+  { key: "proforma", label: "Proforma", note: "raise proforma invoices" },
+  { key: "shipments", label: "Shipments", note: "invoice a shipment against a proforma" },
+  { key: "analytics", label: "Analytics", note: "reports (phase 2)" },
+  { key: "company", label: "Company", note: "registered details and bank particulars" },
+  { key: "users", label: "Users", note: "see accounts and the audit log — only an admin can change them" },
 ];
-
-const NAV = [
-  { key: "overview", label: "Overview" },
-  { key: "parties", label: "Parties", needs: "parties" },
-  { key: "quotations", label: "Quotations", needs: "documents" },
-  { key: "proforma", label: "Proforma", needs: "documents" },
-  { key: "shipments", label: "Shipments", needs: "documents" },
-  { key: "analytics", label: "Analytics", needs: "documents" },
-  { key: "company", label: "Company", needs: "company" },
-  { key: "users", label: "Users", adminOnly: true },
-];
+const ALL_SECTION_KEYS = SECTIONS.map((s) => s.key);
 
 const AppCtx = createContext(null);
 const useApp = () => useContext(AppCtx);
@@ -149,6 +147,8 @@ function CommandPalette({ open, onClose, onNavigate, sections }) {
   store.pis.forEach((x) => { if (match(x.docNo) || match(x.buyerName)) results.push({ kind: "Proforma", label: x.docNo, meta: x.buyerName, go: "proforma" }); });
   store.finalInvoices.forEach((x) => { if (match(x.docNo) || match(x.buyerName)) results.push({ kind: "Shipment", label: x.docNo, meta: x.buyerName, go: "shipments" }); });
 
+  const reachable = new Set(sections.map((s) => s.key));
+  const shown = results.filter((r) => reachable.has(r.go));
   const pick = (r) => { onNavigate(r.go); onClose(); };
 
   return (
@@ -161,21 +161,21 @@ function CommandPalette({ open, onClose, onNavigate, sections }) {
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") onClose();
-              if (e.key === "Enter" && results.length) pick(results[0]);
+              if (e.key === "Enter" && shown.length) pick(shown[0]);
             }}
             className="w-full bg-transparent py-3.5 text-sm text-[var(--text)] placeholder:text-[var(--faint)]"
           />
           <kbd className="rounded border border-[var(--line)] px-1.5 py-0.5 text-[10px] text-[var(--muted)]">esc</kbd>
         </div>
         <div className="max-h-80 overflow-auto py-2">
-          {results.slice(0, 30).map((r, i) => (
+          {shown.slice(0, 30).map((r, i) => (
             <button key={i} onClick={() => pick(r)} className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-[var(--field)]">
               <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-[var(--faint)]">{r.kind}</span>
               <span className="text-sm text-[var(--text)]">{r.label}</span>
               {r.meta && <span className="text-xs text-[var(--muted)]">{r.meta}</span>}
             </button>
           ))}
-          {results.length === 0 && <p className="px-4 py-6 text-center text-sm text-[var(--muted)]">Nothing matches “{q}”.</p>}
+          {shown.length === 0 && <p className="px-4 py-6 text-center text-sm text-[var(--muted)]">Nothing matches “{q}”.</p>}
         </div>
       </div>
     </div>
@@ -356,7 +356,8 @@ function App() {
   if (profile === undefined) return <Splash>Loading your profile…</Splash>;
 
   const can = accessOf(profile);
-  if (!profile || !profile.active || !(can.isAdmin || can.documents || can.parties || can.company)) {
+  const holdsAny = ALL_SECTION_KEYS.some((key) => can[key]);
+  if (!profile || !profile.active || !holdsAny) {
     return (
       <Splash>
         <div className={card + " w-full max-w-md p-6"}>
@@ -376,8 +377,8 @@ function App() {
   }
 
   const user = profile;
-  const allowed = (needs) => !needs || can.isAdmin || Boolean(can[needs]);
-  const sections = NAV.filter((n) => (n.adminOnly ? can.isAdmin : allowed(n.needs)));
+  const allowed = (section) => Boolean(can[section]);
+  const sections = SECTIONS.filter((s) => allowed(s.key));
   const current = sections.find((s) => s.key === active) || sections[0];
   const drift = can.isAdmin && !loadError ? computeMigrationDrift(store.migrationIds) : { inSync: true };
   const ctx = { store, refresh, user, can: allowed, isAdmin: can.isAdmin, loading };
@@ -482,19 +483,23 @@ function Overview({ onNavigate }) {
         blurb="Every shipment runs quotation → proforma → shipment, and each document inherits from the one before it. Master data is captured once and copied into a document at the moment it is created."
       />
       <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* A figure appears only for a section this account holds — the
+            overview never reveals a count from somewhere it cannot open. */}
         {can("parties") && <Stat label="Parties on file" value={store.parties.length} />}
-        {can("documents") && <Stat label="Quotations" value={store.quotations.length} />}
-        {can("documents") && <Stat label="Open proforma" value={openPis.length} hint="awaiting a shipment" />}
-        {can("documents") && <Stat label="Shipments invoiced" value={store.finalInvoices.length} />}
+        {can("quotations") && <Stat label="Quotations" value={store.quotations.length} />}
+        {(can("proforma") || can("shipments")) && <Stat label="Open proforma" value={openPis.length} hint="awaiting a shipment" />}
+        {can("shipments") && <Stat label="Shipments invoiced" value={store.finalInvoices.length} />}
       </div>
 
-      {can("documents") && openPis.length > 0 && (
+      {(can("proforma") || can("shipments")) && openPis.length > 0 && (
         <div className={card + " overflow-hidden"}>
           <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4">
             <p className="font-display text-lg">Awaiting shipment</p>
-            <button onClick={() => onNavigate("shipments")} className="flex items-center gap-1 text-sm text-[var(--accent)]">
-              Go to shipments <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+            {can("shipments") && (
+              <button onClick={() => onNavigate("shipments")} className="flex items-center gap-1 text-sm text-[var(--accent)]">
+                Go to shipments <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
           <table className="w-full">
             <thead className="bg-[var(--panel)]">
@@ -513,7 +518,7 @@ function Overview({ onNavigate }) {
         </div>
       )}
 
-      {user.role === "admin" && store.audit.length > 0 && (
+      {can("users") && store.audit.length > 0 && (
         <div className={card + " mt-6 p-5"}>
           <p className="mb-4 font-display text-lg">Recent activity</p>
           <ul className="space-y-2">
@@ -1724,9 +1729,42 @@ function generatePassword() {
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
 }
 
+// The eight tick-boxes. Used when adding an account and when changing one.
+function SectionPicker({ value, onChange, locked }) {
+  const held = new Set(value);
+  const toggle = (key) => {
+    const next = new Set(held);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    onChange(ALL_SECTION_KEYS.filter((k) => next.has(k)));
+  };
+  return (
+    <fieldset>
+      <legend className={label}>Section access</legend>
+      <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+        {SECTIONS.map((s) => (
+          <label key={s.key} className="flex items-start gap-2 text-sm text-[var(--text)]">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--accent)]" disabled={locked}
+              checked={locked ? true : held.has(s.key)} onChange={() => toggle(s.key)} />
+            <span>
+              {s.label}
+              <span className="block text-xs text-[var(--faint)]">{s.note}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {!locked && (
+        <div className="mt-3 flex gap-4 text-xs">
+          <button type="button" onClick={() => onChange(ALL_SECTION_KEYS)} className="text-[var(--accent)]">Tick all</button>
+          <button type="button" onClick={() => onChange([])} className="text-[var(--muted)]">Clear</button>
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
 function UsersPage() {
-  const { store, refresh, user } = useApp();
-  const blank = { name: "", email: "", password: "", role: "staff", access: { documents: false, parties: false, company: false } };
+  const { store, refresh, user, isAdmin } = useApp();
+  const blank = { name: "", email: "", password: "", role: "staff", sections: [] };
   const [form, setForm] = useState(blank);
   const [showPassword, setShowPassword] = useState(false);
   const [formError, setFormError] = useState("");
@@ -1744,11 +1782,14 @@ function UsersPage() {
     if (!form.name.trim()) return setFormError("Name is required.");
     if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) return setFormError("Enter a valid email address.");
     if (form.password.length < 8) return setFormError("The password must be at least 8 characters.");
+    if (form.role !== "admin" && form.sections.length === 0) {
+      return setFormError("Tick at least one section — an account with none cannot open anything.");
+    }
     setBusy(true);
     const message = await attempt(async () => {
       await adminApi("create", {
         email: form.email.trim(), password: form.password, full_name: form.name.trim(),
-        role: form.role, access: form.access,
+        role: form.role, sections: form.sections,
       });
       await refresh();
     });
@@ -1766,6 +1807,12 @@ function UsersPage() {
     setPageError(message);
   };
 
+  const toggleSection = (u, key) => {
+    const held = new Set(u.sections || []);
+    if (held.has(key)) held.delete(key); else held.add(key);
+    change(u, { sections: ALL_SECTION_KEYS.filter((k) => held.has(k)) });
+  };
+
   const savePassword = async () => {
     if (passwordFor.value.length < 8) return setPageError("The password must be at least 8 characters.");
     const message = await attempt(() => adminApi("set_password", { user_id: passwordFor.id, password: passwordFor.value }));
@@ -1774,13 +1821,16 @@ function UsersPage() {
   };
 
   const accessText = (u) => (u.role === "admin" ? "All sections"
-    : ACCESS_KEYS.filter((a) => (u.access || {})[a.key]).map((a) => a.label).join(", ") || "None");
+    : SECTIONS.filter((s) => (u.sections || []).includes(s.key)).map((s) => s.label).join(", ") || "None");
 
   const userColumns = [
     { label: "Name", value: (u) => u.name, width: 26 },
     { label: "Email", value: (u) => u.email, width: 32 },
     { label: "Role", value: (u) => u.role, width: 10 },
-    { label: "Section access", value: accessText, width: 40 },
+    ...SECTIONS.map((s) => ({
+      label: s.label, width: 12,
+      value: (u) => (u.role === "admin" || (u.sections || []).includes(s.key) ? "Yes" : ""),
+    })),
     { label: "Status", value: (u) => (u.active ? "Active" : "Deactivated"), width: 14 },
     { label: "Last sign-in", value: (u) => (u.lastLogin ? fmtWhen(u.lastLogin) : "never") },
   ];
@@ -1798,46 +1848,43 @@ function UsersPage() {
     <div>
       <PageHead
         title="Users & access"
-        blurb="One core Admin role plus custom access profiles. Staff see only the sections they're granted — Party master and Company profile stay hidden without access. Every change lands in the audit log."
+        blurb="Every toolbar section is its own grant. An account sees only the sections ticked for it; an admin holds all of them. Every change lands in the audit log."
       />
 
-      <form onSubmit={createUser} className={card + " mb-6 p-6"}>
-        <p className="mb-5 text-sm font-medium">Add a user</p>
-        <div className="grid gap-5 lg:grid-cols-[1fr_1fr_1fr_1fr]">
-          <Field label="Name"><input className={input} value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
-          <Field label="Email"><input type="email" className={input} value={form.email} autoComplete="off" onChange={(e) => set("email", e.target.value)} /></Field>
-          <Field label="Password" hint="At least 8 characters">
-            <span className="flex gap-2">
-              <input type={showPassword ? "text" : "password"} className={input} value={form.password} autoComplete="new-password"
-                onChange={(e) => set("password", e.target.value)} />
-              <button type="button" className={btnGhost + " shrink-0"} onClick={() => { set("password", generatePassword()); setShowPassword(true); }}>Generate</button>
-            </span>
-          </Field>
-          <Field label="Role">
-            <select className={input} value={form.role} onChange={(e) => set("role", e.target.value)}>
-              <option value="staff">Staff (custom access)</option>
-              <option value="admin">Admin (full access)</option>
-            </select>
-          </Field>
+      {!isAdmin && (
+        <div className={panel + " mb-6 flex items-start gap-3 p-4 text-sm text-[var(--muted)]"}>
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>You can see the accounts and the audit log. Adding an account, changing access or setting a password needs an administrator.</span>
         </div>
-        <fieldset className="mt-5">
-          <legend className={label}>Section access</legend>
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            {ACCESS_KEYS.map((a) => (
-              <label key={a.key} className="flex items-center gap-2 text-sm text-[var(--muted)]" title={a.note}>
-                <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" disabled={form.role === "admin"}
-                  checked={form.role === "admin" ? true : form.access[a.key]}
-                  onChange={() => set("access", { ...form.access, [a.key]: !form.access[a.key] })} />
-                {a.label} <span className="text-xs text-[var(--faint)]">— {a.note}</span>
-              </label>
-            ))}
+      )}
+
+      {isAdmin && (
+        <form onSubmit={createUser} className={card + " mb-6 p-6"}>
+          <p className="mb-5 text-sm font-medium">Add a user</p>
+          <div className="mb-6 grid gap-5 lg:grid-cols-4">
+            <Field label="Name"><input className={input} value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
+            <Field label="Email"><input type="email" className={input} value={form.email} autoComplete="off" onChange={(e) => set("email", e.target.value)} /></Field>
+            <Field label="Password" hint="At least 8 characters">
+              <span className="flex gap-2">
+                <input type={showPassword ? "text" : "password"} className={input} value={form.password} autoComplete="new-password"
+                  onChange={(e) => set("password", e.target.value)} />
+                <button type="button" className={btnGhost + " shrink-0"} onClick={() => { set("password", generatePassword()); setShowPassword(true); }}>Generate</button>
+              </span>
+            </Field>
+            <Field label="Role" hint={form.role === "admin" ? "An admin can open and change everything" : "Staff open only what is ticked below"}>
+              <select className={input} value={form.role} onChange={(e) => set("role", e.target.value)}>
+                <option value="staff">Staff (custom access)</option>
+                <option value="admin">Admin (full access)</option>
+              </select>
+            </Field>
           </div>
-        </fieldset>
-        <div className="mt-5 flex items-center justify-between">
-          <span aria-live="polite" className={errText}>{formError}</span>
-          <button type="submit" disabled={busy} className={btn}>{busy ? "Creating…" : "Create user"}</button>
-        </div>
-      </form>
+          <SectionPicker value={form.sections} onChange={(v) => set("sections", v)} locked={form.role === "admin"} />
+          <div className="mt-5 flex items-center justify-between">
+            <span aria-live="polite" className={errText}>{formError}</span>
+            <button type="submit" disabled={busy} className={btn}>{busy ? "Creating…" : "Create user"}</button>
+          </div>
+        </form>
+      )}
 
       {created && (
         <div role="status" className={card + " mb-6 flex items-start justify-between gap-4 border-[var(--accent)]/40 p-5"}>
@@ -1854,13 +1901,19 @@ function UsersPage() {
 
       <div aria-live="polite">{pageError && <p className={errText + " mb-4"}>{pageError}</p>}</div>
 
-      <div className="mb-3 flex justify-end"><ExcelButton name="users" columns={userColumns} rows={store.users} /></div>
-      <div className={card + " overflow-hidden"}>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs text-[var(--muted)]">
+          {isAdmin ? "Click a section on someone's row to grant or revoke it. It takes effect at once — their toolbar changes without signing out." : ""}
+        </p>
+        <ExcelButton name="users" columns={userColumns} rows={store.users} />
+      </div>
+      <div className={card + " overflow-x-auto"}>
         <table className="w-full">
           <thead className="bg-[var(--panel)]">
             <tr>
               <th className={th}>Name</th><th className={th}>Email</th><th className={th}>Role</th>
-              <th className={th}>Section access</th><th className={th}>Last sign-in</th><th className={th + " text-right"}>Actions</th>
+              <th className={th}>Section access</th><th className={th}>Last sign-in</th>
+              {isAdmin && <th className={th + " text-right"}>Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -1874,63 +1927,67 @@ function UsersPage() {
                 </td>
                 <td className={td}>
                   {u.role === "admin" ? <span className="text-xs text-[var(--muted)]">All sections</span> : (
-                    <span className="flex flex-wrap gap-1.5">
-                      {ACCESS_KEYS.map((a) => {
-                        const on = Boolean((u.access || {})[a.key]);
-                        return (
-                          <button key={a.key} onClick={() => change(u, { [a.key]: !on })} aria-pressed={on}
-                            title={(on ? "Revoke " : "Grant ") + a.label}>
-                            <Chip tone={on ? "ok" : "off"}>{a.label}</Chip>
+                    <span className="flex max-w-md flex-wrap gap-1.5">
+                      {SECTIONS.map((s) => {
+                        const on = (u.sections || []).includes(s.key);
+                        return isAdmin ? (
+                          <button key={s.key} onClick={() => toggleSection(u, s.key)} aria-pressed={on}
+                            title={(on ? "Revoke " : "Grant ") + s.label}>
+                            <Chip tone={on ? "ok" : "off"}>{s.label}</Chip>
                           </button>
-                        );
+                        ) : (on ? <Chip key={s.key} tone="ok">{s.label}</Chip> : null);
                       })}
+                      {!isAdmin && (u.sections || []).length === 0 && <span className="text-xs text-[var(--faint)]">None</span>}
                     </span>
                   )}
                 </td>
                 <td className={td + " text-xs text-[var(--muted)]"}>{u.lastLogin ? fmtWhen(u.lastLogin) : "never"}</td>
-                <td className={td + " text-right"}>
-                  {passwordFor && passwordFor.id === u.id ? (
-                    <span className="flex items-center justify-end gap-2">
-                      <input type="text" aria-label={"New password for " + u.email} className={input + " w-44"} value={passwordFor.value}
-                        onChange={(e) => setPasswordFor({ ...passwordFor, value: e.target.value })} />
-                      <button onClick={() => setPasswordFor({ ...passwordFor, value: generatePassword() })} className="text-xs text-[var(--muted)]">Generate</button>
-                      <button onClick={savePassword} className="text-xs text-[var(--accent)]">Save</button>
-                      <button onClick={() => setPasswordFor(null)} className="text-xs text-[var(--muted)]">Cancel</button>
-                    </span>
-                  ) : (
-                    <span className="flex items-center justify-end gap-4">
-                      <button onClick={() => { setPageError(""); setPasswordFor({ id: u.id, email: u.email, value: "" }); }}
-                        className="flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--text)]">
-                        <KeyRound className="h-3 w-3" /> Set password
-                      </button>
-                      {u.id !== user.id && (
-                        <React.Fragment>
-                          <button onClick={() => change(u, { role: u.role === "admin" ? "staff" : "admin" })}
-                            className="text-xs text-[var(--muted)] hover:text-[var(--text)]">
-                            {u.role === "admin" ? "Make staff" : "Make admin"}
-                          </button>
-                          <button onClick={() => change(u, { active: !u.active })}
-                            className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">
-                            {u.active ? "Deactivate" : "Reactivate"}
-                          </button>
-                        </React.Fragment>
-                      )}
-                    </span>
-                  )}
-                </td>
+                {isAdmin && (
+                  <td className={td + " text-right"}>
+                    {passwordFor && passwordFor.id === u.id ? (
+                      <span className="flex items-center justify-end gap-2">
+                        <input type="text" aria-label={"New password for " + u.email} className={input + " w-44"} value={passwordFor.value}
+                          onChange={(e) => setPasswordFor({ ...passwordFor, value: e.target.value })} />
+                        <button onClick={() => setPasswordFor({ ...passwordFor, value: generatePassword() })} className="text-xs text-[var(--muted)]">Generate</button>
+                        <button onClick={savePassword} className="text-xs text-[var(--accent)]">Save</button>
+                        <button onClick={() => setPasswordFor(null)} className="text-xs text-[var(--muted)]">Cancel</button>
+                      </span>
+                    ) : (
+                      <span className="flex items-center justify-end gap-4 whitespace-nowrap">
+                        <button onClick={() => { setPageError(""); setPasswordFor({ id: u.id, email: u.email, value: "" }); }}
+                          className="flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--text)]">
+                          <KeyRound className="h-3 w-3" /> Set password
+                        </button>
+                        {u.id !== user.id && (
+                          <React.Fragment>
+                            <button onClick={() => change(u, u.role === "admin" ? { role: "staff", sections: [] } : { role: "admin" })}
+                              className="text-xs text-[var(--muted)] hover:text-[var(--text)]">
+                              {u.role === "admin" ? "Make staff" : "Make admin"}
+                            </button>
+                            <button onClick={() => change(u, { active: !u.active })}
+                              className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">
+                              {u.active ? "Deactivate" : "Reactivate"}
+                            </button>
+                          </React.Fragment>
+                        )}
+                      </span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
             {store.users.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--muted)]">No accounts yet — add the first one above.</td></tr>
+              <tr><td colSpan={isAdmin ? 6 : 5} className="px-4 py-10 text-center text-sm text-[var(--muted)]">No accounts yet — add the first one above.</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       <p className="mt-4 max-w-4xl text-xs leading-relaxed text-[var(--muted)]">
-        Note: staff need the Documents permission to work with quotations, proforma invoices and shipments. Deactivating
-        blocks an account at once without removing anything it created — accounts are never deleted, so the audit trail
-        always has a name behind it.
+        Note: raising a proforma picks its buyer from the party master, so a person who needs Proforma also needs Parties.
+        Shipments can read proformas without the Proforma grant, because a shipment is always raised against one.
+        Deactivating blocks an account at once without removing anything it created — accounts are never deleted, so the
+        audit trail always has a name behind it.
       </p>
 
       <div className="mt-8 flex items-center gap-3">

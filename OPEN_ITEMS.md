@@ -21,10 +21,13 @@ a green build.
 ## Owed by the build
 
 **At promotion**
-- [ ] Apply `db/pending/010_lockdown_direct_writes.sql` once the RPC-only client
-      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 10 in the same
+- [ ] Apply `db/pending/011_lockdown_direct_writes.sql` once the RPC-only client
+      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 11 in the same
       commit. Until then the tables still accept direct writes from a signed-in
       user who has the grant.
+- [ ] Then drop the three legacy columns (`access_documents`, `access_parties`,
+      `access_company`) and the legacy branch of `_profiles_sync_access` — they
+      exist only for the client that is live today (decisions/006).
 
 **Next increment — usability the Bible requires**
 - [ ] Tables: sortable headers and reorderable columns from one column registry.
@@ -34,9 +37,10 @@ a green build.
 - [ ] Home as a briefing — one sentence saying what needs attention — not stat cards.
 - [ ] Units alongside boxes on quotation lines (proforma and shipment have them).
 - [ ] A currency on the quotation, so its amount-in-words names one.
-- [ ] Staff with Documents but not Party master cannot raise a proforma: the form
-      reads the party list they are not allowed to see. Needs a decision —
-      a read-only party picker for document users is the likely answer.
+- [ ] A person with Proforma but not Parties cannot raise a proforma: the form
+      picks its buyer from the party master (decisions/006). The Users screen
+      says so. If that pairing is a nuisance, the answer is a read-only buyer
+      picker for proforma users — an owner decision, since it opens the price list.
 
 **Not yet built**
 - [ ] `check:grants` against the live database in CI (needs a `DATABASE_URL`
