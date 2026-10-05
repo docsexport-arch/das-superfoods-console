@@ -21,17 +21,21 @@ a green build.
 ## Owed by the build
 
 **At promotion**
-- [ ] Apply `db/pending/014_lockdown_direct_writes.sql` once the RPC-only client
-      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 14 in the same
+- [ ] Apply `db/pending/015_lockdown_direct_writes.sql` once the RPC-only client
+      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 15 in the same
       commit. Until then the tables still accept direct writes from a signed-in
       user who has the grant.
 - [ ] Then drop the three legacy columns (`access_documents`, `access_parties`,
       `access_company`) and the legacy branch of `_profiles_sync_access` — they
       exist only for the client that is live today (decisions/006).
+- [ ] Then drop `company_profile.ifsc` and take `'ifsc'` out of the company
+      snapshot in `create_shipment` — in ONE migration, since the function names
+      the column. IFSC is already gone from every screen and document
+      (decisions/011); the column is kept only because the live client reads it.
 
 **Next increment — usability the Bible requires**
 - [ ] Tables: sortable headers and reorderable columns from one column registry.
-- [ ] Inline edit where data is shown; edit and retire a proforma while it is open.
+- [ ] Inline edit where data is shown; retire a proforma while it is open (edit exists — decisions/011).
 - [ ] PDF for the proforma, and for the shipment's three documents (tax invoice,
       commercial invoice, packing list). Quotation PDF exists.
 - [ ] Home as a briefing — one sentence saying what needs attention — not stat cards.

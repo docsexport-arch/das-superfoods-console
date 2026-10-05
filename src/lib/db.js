@@ -149,6 +149,7 @@ export const proformaFromRow = (r) => ({
   taxRate: num(r.tax_rate), taxAmount: num(r.tax_amount), grandTotal: num(r.grand_total),
   items: r.items || [],
   linkedFinalInvoiceId: r.shipment_id,
+  updatedAt: r.updated_at,
 });
 
 export const shipmentFromRow = (r) => ({
@@ -168,7 +169,7 @@ export const shipmentFromRow = (r) => ({
 
 export const companyFromRow = (r) => ({
   name: r.name, address: r.address, bankName: r.bank_name, accountNo: r.account_no,
-  ifsc: r.ifsc, swift: r.swift, gstNo: r.gst_no, iecCode: r.iec_code,
+  swift: r.swift, gstNo: r.gst_no, iecCode: r.iec_code,
 });
 
 export const userFromRow = (r) => ({
@@ -193,7 +194,7 @@ export const draftFromRow = (r) => ({
 
 export const emptyStore = () => ({
   users: [],
-  company: { name: "", address: "", bankName: "", accountNo: "", ifsc: "", swift: "", gstNo: "", iecCode: "" },
+  company: { name: "", address: "", bankName: "", accountNo: "", swift: "", gstNo: "", iecCode: "" },
   parties: [], quotations: [], pis: [], finalInvoices: [], drafts: [], audit: [], migrationIds: [],
 });
 

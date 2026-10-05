@@ -119,7 +119,12 @@ describe("every screen renders", () => {
 
   it("analytics and company", () => {
     expect(draw(<AnalyticsPage />)).toContain("phase 2");
-    expect(draw(<CompanyPage />)).toContain("HDFC0000123");
+    const companyPage = draw(<CompanyPage />);
+    expect(companyPage).toContain("HDFCINBB");
+    // IFSC was removed from the company profile on the owner's instruction
+    // (decisions/011) — even when an old value is still on the row.
+    expect(companyPage).not.toContain("HDFC0000123");
+    expect(companyPage).not.toMatch(/IFSC/i);
   });
 
   it("users — an admin gets the add-a-user form, all eight tick-boxes, and the row actions", () => {

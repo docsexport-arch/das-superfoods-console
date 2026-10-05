@@ -20,7 +20,7 @@ export const QUOTATION_KEYS = [
   "paymentTerm", "igst", "igstRate", "items", "expectedUpdatedAt",
 ];
 export const PROFORMA_KEYS = [
-  "docNo", "type", "partyId", "quotationRef", "buyerName", "buyerAddress", "consigneeName",
+  "id", "expectedUpdatedAt", "docNo", "type", "partyId", "quotationRef", "buyerName", "buyerAddress", "consigneeName",
   "consigneeAddress", "consigneeOptions", "portOfLoading", "destinationPort",
   "shipmentTerm", "paymentTerm", "conditions", "currency", "buyerOrderNo",
   "buyerOrderDate", "additionalDetails", "taxRate", "items",
@@ -31,7 +31,7 @@ export const SHIPMENT_KEYS = [
   "containerNo", "vehicleNo", "customSeal", "lineSeal", "portOfLoading", "incoterm",
 ];
 export const COMPANY_KEYS = [
-  "name", "address", "bankName", "accountNo", "ifsc", "swift", "gstNo", "iecCode",
+  "name", "address", "bankName", "accountNo", "swift", "gstNo", "iecCode",
 ];
 export const USER_ACCESS_KEYS = ["role", "fullName", "active", "sections"];
 // A saved draft. `payload` is the form's own state and is stored as it is —
@@ -42,7 +42,7 @@ export const DRAFT_KEYS = ["id", "kind", "title", "refId", "payload", "expectedU
 export const RPC_CONTRACT = {
   save_party: [...PARTY_KEYS, ...PARTY_PRODUCT_KEYS, ...ALT_BUYER_KEYS],
   save_quotation: QUOTATION_KEYS,
-  create_proforma: PROFORMA_KEYS,
+  save_proforma: PROFORMA_KEYS,
   create_shipment: SHIPMENT_KEYS,
   save_company: COMPANY_KEYS,
   set_user_access: USER_ACCESS_KEYS,

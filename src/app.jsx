@@ -1203,18 +1203,43 @@ function DraftList({ drafts, onResume, onDiscard }) {
 }
 
 /* ------------------------------------------------------------ proforma */
-function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
+function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
   const { store } = useApp();
   const eligible = store.parties.filter((p) => p.type === type);
-  // Continuing a draft: the form starts as it was left. If the party it was for
-  // is no longer on file its product lines cannot be trusted, so they are dropped.
-  const saved = (draft && draft.payload) || {};
+  // The form starts from one of three things: nothing, a saved draft, or — when
+  // editing — the proforma itself, read back into the shape a draft has.
+  // Continuing a draft whose party is no longer on file drops its product
+  // lines: they cannot be trusted against a different party.
+  const saved = editing ? {
+    docNo: editing.docNo, partyId: editing.partyId, quotationRef: editing.quotationRef,
+    orderNo: editing.buyerOrderNo, orderDate: editing.buyerOrderDate, items: editing.items,
+    extra: editing.additionalDetails, taxRate: editing.taxRate,
+    buyer: { name: editing.buyerName, address: editing.buyerAddress },
+    consignee: editing.consigneeName ? { name: editing.consigneeName, address: editing.consigneeAddress } : null,
+  } : (draft && draft.payload) || {};
   const savedParty = eligible.find((p) => p.id === saved.partyId);
   const partyGone = Boolean(draft) && Boolean(saved.partyId) && !savedParty;
+  // Every name offered for buyer and consignee. When editing, the names already
+  // on the proforma stay on offer even if the party has since been changed —
+  // an edit must never swap the buyer or the consignee unasked.
+  const tidy = (v) => String(v || "").trim();
+  const namesFor = (p) => {
+    const base = partyNames(p);
+    if (!editing || !p || p.id !== editing.partyId) return base;
+    const kept = [];
+    for (const who of [saved.buyer, saved.consignee]) {
+      if (!who || !tidy(who.name)) continue;
+      const same = (c) => c.name === tidy(who.name) && c.address === tidy(who.address);
+      if (!base.some(same) && !kept.some(same)) {
+        kept.push({ name: tidy(who.name), address: tidy(who.address), role: "on this proforma", isConsignee: false, label: `${tidy(who.name)} (on this proforma)` });
+      }
+    }
+    return [...base, ...kept];
+  };
   // The names are found again by name and address, not by position: the party
-  // may have been edited since the draft was saved.
+  // may have been edited since the draft was saved or the proforma raised.
   const savedAt = (who) => (savedParty && who
-    ? partyNames(savedParty).findIndex((c) => c.name === who.name && c.address === who.address) : -1);
+    ? namesFor(savedParty).findIndex((c) => c.name === tidy(who.name) && c.address === tidy(who.address)) : -1);
   const [partyId, setPartyId] = useState(savedParty ? savedParty.id : eligible.length ? eligible[0].id : "");
   const party = store.parties.find((p) => p.id === partyId);
   // Typed by hand (db/013) — the database refuses a blank or repeated number.
@@ -1228,15 +1253,31 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
   // Which of the party's names is the buyer on this proforma (0 is the main
   // one) and which is the consignee (null = the party's own consignee).
   const [buyerIdx, setBuyerIdx] = useState(Math.max(0, savedAt(saved.buyer)));
-  const [consigneeIdx, setConsigneeIdx] = useState(savedAt(saved.consignee) >= 0 ? savedAt(saved.consignee) : null);
+  // A proforma raised with no consignee stays that way when edited (-1), rather
+  // than quietly picking up the party's.
+  const [consigneeIdx, setConsigneeIdx] = useState(
+    savedAt(saved.consignee) >= 0 ? savedAt(saved.consignee) : editing && !saved.consignee ? -1 : null);
   const isIntl = type === "international";
-  const choices = partyNames(party);
+  const choices = namesFor(party);
   const nobody = { name: "", address: "" };
   const buyer = choices[buyerIdx] || choices[0] || nobody;
   const ownConsignee = choices.findIndex((c) => c.isConsignee);
   const consigneeAt = consigneeIdx === null ? ownConsignee : consigneeIdx;
   const consignee = choices[consigneeAt] || nobody;
   const consigneeLabel = isIntl ? "Consignee" : "Manufactured by / ship to";
+
+  // Ports, terms and currency are read from the party when the form is saved.
+  // Without the party the proforma was raised for there is nothing safe to read.
+  if (editing && !savedParty) {
+    return (
+      <div className={card + " mb-6 p-6"}>
+        <p className="text-sm text-[var(--muted)]">
+          The party {editing.docNo} was raised for is no longer on file, so it cannot be edited here. It is unchanged.
+        </p>
+        <button onClick={onCancel} className={btnGhost + " mt-4"}>Close</button>
+      </div>
+    );
+  }
 
   if (!party) {
     return (
@@ -1268,8 +1309,9 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
       <div className="mb-5 flex items-start justify-between">
         <div>
           <p className="font-display text-lg">
-            {draft ? "Draft" : "New"} {isIntl ? "international" : "private-label / merchant-export"} proforma
+            {editing ? "Edit" : draft ? "Draft" : "New"} {isIntl ? "international" : "private-label / merchant-export"} proforma
           </p>
+          {editing && <p className="mt-1 text-xs text-[var(--muted)]">Editing {editing.docNo}, raised {fmtDate(editing.date)}. The date it was raised does not change, and the change is recorded in the audit log.</p>}
           {draft && <p className="mt-1 text-xs text-[var(--muted)]">Continuing the draft saved by {draft.savedBy || "—"} · {fmtWhen(draft.updatedAt)}</p>}
           {partyGone && <p className="mt-1 text-xs text-[var(--status-warn)]">The party this draft was for is no longer on file, so its product lines were cleared. Pick a party to continue.</p>}
         </div>
@@ -1295,7 +1337,7 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
             </Field>
             <Field label={isIntl ? "Consignee on this proforma" : "Ship to on this proforma"} hint="Any name on this party can be the consignee">
               <select className={input} value={consigneeAt} onChange={(e) => setConsigneeIdx(Number(e.target.value))}>
-                {ownConsignee < 0 && <option value={-1}>Not set</option>}
+                {(ownConsignee < 0 || consigneeAt < 0) && <option value={-1}>Not set</option>}
                 {choices.map((c, i) => <option key={i} value={i}>{c.label}</option>)}
               </select>
             </Field>
@@ -1392,7 +1434,8 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
             })}>Save draft</button>
           )}
           <button className={btn} onClick={() => onSave({
-            id: tempId(), docNo: docNo.trim(), type, date: todayIST(), partyId, quotationRef,
+            id: editing ? editing.id : undefined, expectedUpdatedAt: editing ? editing.updatedAt : undefined,
+            docNo: docNo.trim(), type, date: todayIST(), partyId, quotationRef,
             buyerName: buyer.name, buyerAddress: buyer.address,
             consigneeName: consignee.name, consigneeAddress: consignee.address,
             // Every name on the party travels with the proforma, so the shipment
@@ -1403,7 +1446,7 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
             currency: party.currency, buyerOrderNo: orderNo, buyerOrderDate: orderDate, items, additionalDetails: extra,
             totalBoxes, totalValue, taxableValue, taxRate, taxAmount,
             grandTotal: isIntl ? totalValue : grandTotal, linkedFinalInvoiceId: null,
-          })}>Create proforma</button>
+          })}>{editing ? "Save changes" : "Create proforma"}</button>
         </div>
       </div>
     </div>
@@ -1515,7 +1558,7 @@ function ProformaDocument({ pi, company }) {
           <p className="muted" style={small}>Bank details</p>
           <p style={{ margin: "3px 0 0" }}>{company.bankName || "—"}</p>
           <p style={{ margin: 0 }}>Account: {company.accountNo || "—"}</p>
-          <p style={{ margin: 0 }}>IFSC: {company.ifsc || "—"} · SWIFT: {company.swift || "—"}</p>
+          <p style={{ margin: 0 }}>SWIFT: {company.swift || "—"}</p>
         </div>
         <div style={{ textAlign: "right" }}>
           <p style={{ margin: 0 }}>For <b>{company.name || "Das Superfoods"}</b></p>
@@ -1526,15 +1569,15 @@ function ProformaDocument({ pi, company }) {
   );
 }
 
-function ProformaPage() {
+function ProformaPage({ initialTab = "open" }) {
   const { store, refresh } = useApp();
-  const [form, setForm] = useState(null);           // null | { type, draft }
-  const [tab, setTab] = useState("open");
+  const [form, setForm] = useState(null);           // null | { type, draft, editing }
+  const [tab, setTab] = useState(initialTab);
   const [saveError, setSaveError] = useState("");
   const [notice, setNotice] = useState("");
   const list = tab === "open" ? store.pis.filter((p) => !p.linkedFinalInvoiceId) : store.pis;
   const drafts = store.drafts.filter((d) => d.kind === "proforma");
-  const open = (type, draft = null) => { setSaveError(""); setNotice(""); setForm({ type, draft }); };
+  const open = (type, draft = null, editing = null) => { setSaveError(""); setNotice(""); setForm({ type, draft, editing }); };
 
   // From a draft, the proforma and the draft's retirement are one transaction.
   const createProforma = async (pi) => {
@@ -1542,17 +1585,19 @@ function ProformaPage() {
     // is the one that decides (db/013).
     const typed = String(pi.docNo || "").trim();
     if (!typed) { setSaveError("Enter the proforma number."); return; }
-    if (store.pis.some((p) => String(p.docNo || "").trim().toUpperCase() === typed.toUpperCase())) {
+    const editingId = form && form.editing ? form.editing.id : null;
+    if (store.pis.some((p) => p.id !== editingId && String(p.docNo || "").trim().toUpperCase() === typed.toUpperCase())) {
       setSaveError(`Proforma number ${typed} is already in use. Type a different number.`);
       return;
     }
     const message = await attempt(async () => {
       if (form && form.draft) await call("raise_from_draft", { p_draft: form.draft.id, p: pick(pi, PROFORMA_KEYS) });
-      else await call("create_proforma", { p: pick(pi, PROFORMA_KEYS) });
+      // One function raises and edits: an id in the payload makes it an edit.
+      else await call("save_proforma", { p: pick(pi, PROFORMA_KEYS) });
       await refresh();
     });
     setSaveError(message);
-    if (!message) setForm(null);
+    if (!message) { setForm(null); if (editingId) setNotice(`Proforma ${typed} updated.`); }
   };
 
   const saveDraft = async ({ title, payload }) => {
@@ -1637,8 +1682,9 @@ function ProformaPage() {
         {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
         {notice && !saveError && <p className="mb-4 text-sm text-[var(--status-ok)]">{notice}</p>}
       </div>
-      {form && <ProformaForm key={form.type + (form.draft ? form.draft.id : "")} type={form.type} draft={form.draft}
-        onCancel={() => setForm(null)} onSave={createProforma} onSaveDraft={saveDraft} />}
+      {form && <ProformaForm key={form.type + (form.draft ? form.draft.id : "") + (form.editing ? form.editing.id : "")}
+        type={form.type} draft={form.draft} editing={form.editing}
+        onCancel={() => setForm(null)} onSave={createProforma} onSaveDraft={form.editing ? undefined : saveDraft} />}
       {!form && <DraftList drafts={drafts} onDiscard={discardDraft}
         onResume={(d) => open(d.payload.type === "domestic" ? "domestic" : "international", d)} />}
 
@@ -1649,7 +1695,7 @@ function ProformaPage() {
               <th className={th}>Document</th><th className={th}>Date</th><th className={th}>Buyer</th><th className={th}>Type</th>
               <th className={th + " text-right"}>Boxes</th><th className={th + " text-right"}>Units</th>
               <th className={th + " text-right"}>Value</th><th className={th}>Status</th>
-              <th className={th + " text-right"}>Download</th>
+              <th className={th + " text-right"}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1671,10 +1717,19 @@ function ProformaPage() {
                       <button onClick={() => setDownloadId(null)} aria-label="Close download options"><X className="h-3.5 w-3.5 text-[var(--muted)]" /></button>
                     </span>
                   ) : (
-                    <button onClick={() => setDownloadId(pi.id)} aria-label={`Download ${pi.docNo}`}
-                      className="inline-flex items-center gap-1 text-xs text-[var(--accent)]">
-                      <Download className="h-3 w-3" /> Download
-                    </button>
+                    <span className="flex items-center justify-end gap-4">
+                      {/* Once a shipment is invoiced against it, a proforma is a record and stays as it is. */}
+                      {!pi.linkedFinalInvoiceId && (
+                        <button aria-label={`Edit ${pi.docNo}`} className="text-xs text-[var(--accent)]"
+                          onClick={() => { open(pi.type === "domestic" ? "domestic" : "international", null, pi); window.scrollTo(0, 0); }}>
+                          Edit
+                        </button>
+                      )}
+                      <button onClick={() => setDownloadId(pi.id)} aria-label={`Download ${pi.docNo}`}
+                        className="inline-flex items-center gap-1 text-xs text-[var(--accent)]">
+                        <Download className="h-3 w-3" /> Download
+                      </button>
+                    </span>
                   )}
                 </td>
               </tr>
@@ -2126,7 +2181,6 @@ function CompanyPage() {
           <Field label="Registered address" className="md:col-span-2"><input className={input} value={draft.address} onChange={(e) => set("address", e.target.value)} /></Field>
           <Field label="Bank name"><input className={input} value={draft.bankName} onChange={(e) => set("bankName", e.target.value)} /></Field>
           <Field label="Account no."><input className={input} value={draft.accountNo} onChange={(e) => set("accountNo", e.target.value)} /></Field>
-          <Field label="IFSC"><input className={input} value={draft.ifsc} onChange={(e) => set("ifsc", e.target.value)} /></Field>
           <Field label="SWIFT"><input className={input} value={draft.swift} onChange={(e) => set("swift", e.target.value)} /></Field>
           <Field label="GST no."><input className={input} value={draft.gstNo} onChange={(e) => set("gstNo", e.target.value)} /></Field>
           <Field label="IEC code"><input className={input} value={draft.iecCode} onChange={(e) => set("iecCode", e.target.value)} /></Field>

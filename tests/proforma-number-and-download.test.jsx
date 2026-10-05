@@ -163,7 +163,7 @@ describe("the proforma on screen and on paper", () => {
     const html = draw(<ProformaPage />);
     expect(html).toContain("PI/25-26/014");
     expect(html).toMatch(/aria-label="Download PI\/25-26\/014"/);
-    expect(html).toMatch(/<th[^>]*>Download<\/th>/);
+    expect(html).toMatch(/<th[^>]*>Actions<\/th>/);
   });
 
   it("the printed page says the same as the sheet: number, parties, lines, totals, words, bank", () => {
@@ -174,8 +174,11 @@ describe("the proforma on screen and on paper", () => {
       "Loading: Mundra", "Destination: New York", "Shipment: FOB", "Payment: 30% advance",
       "Peanut Butter Crunchy 340g", "12000", "35,540.00", "19200", "56,864.00",
       "US Dollars fifty six thousand eight hundred sixty four only",
-      "HDFC Bank", "Account: 50200012345678", "IFSC: HDFC0000123", "SWIFT: HDFCINBB", "Authorised signatory",
+      "HDFC Bank", "Account: 50200012345678", "SWIFT: HDFCINBB", "Authorised signatory",
     ]) expect(html, s).toContain(s);
+    // No IFSC on any document, even though this company fixture still carries one.
+    expect(html).not.toMatch(/IFSC/i);
+    expect(html).not.toContain("HDFC0000123");
     expect(html).not.toContain("Tax @");
   });
 

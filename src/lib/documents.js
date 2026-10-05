@@ -53,7 +53,6 @@ export function proformaSheetRows(pi, company = {}) {
     [],
     ["Bank", company.bankName || ""],
     ["Account no.", String(company.accountNo || "")],
-    ["IFSC", company.ifsc || ""],
     ["SWIFT", company.swift || ""],
   );
   return rows;
