@@ -9,7 +9,7 @@ says **where things are**.
 
 An order-to-shipment document console for the export desk: Quotation →
 Proforma invoice → Shipment (tax invoice + commercial invoice + packing list),
-with a party master, a company profile, accounts with per-section access, and
+with a party master, a company profile, saved drafts, accounts with per-section access, and
 an append-only audit log. Single-digit concurrent users. Not connected to SAP.
 
 ## Stack

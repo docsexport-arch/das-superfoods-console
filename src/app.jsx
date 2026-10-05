@@ -9,11 +9,11 @@ import {
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
 import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, partyNames, withTimeout, humanise } from "./lib/db.js";
-import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes } from "./lib/format.js";
+import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, gramsFromKg, kgFromGrams } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
 import {
-  pick, PARTY_KEYS, PARTY_PRODUCT_KEYS, QUOTATION_KEYS, PROFORMA_KEYS, SHIPMENT_KEYS, COMPANY_KEYS,
+  pick, PARTY_KEYS, PARTY_PRODUCT_KEYS, QUOTATION_KEYS, PROFORMA_KEYS, SHIPMENT_KEYS, COMPANY_KEYS, DRAFT_KEYS,
 } from "./lib/payloads.js";
 import {
   card, panel, input, btn, btnGhost, th, td, tdNum, label, errText,
@@ -311,7 +311,7 @@ function App() {
       timer = setTimeout(() => { if (table === "profiles") loadProfile(); else refresh(); }, 250);
     };
     const channel = sb.channel("console-changes");
-    for (const table of ["parties", "party_products", "quotations", "proformas", "shipments", "company_profile", "profiles", "audit_log"]) {
+    for (const table of ["parties", "party_products", "quotations", "proformas", "shipments", "drafts", "company_profile", "profiles", "audit_log"]) {
       channel.on("postgres_changes", { event: "*", schema: "public", table }, () => soon(table));
     }
     channel.subscribe();
@@ -540,7 +540,9 @@ function Overview({ onNavigate }) {
 /* --------------------------------------------------------------- parties */
 function ProductRows({ products, setProducts, mode }) {
   const update = (id, field, val) => setProducts(products.map((p) => (p.id === id ? { ...p, [field]: val } : p)));
-  const add = () => setProducts([...products, { id: tempId(), name: "", hsn: "", rate: 0, mrp: 0, netWt: 0, grossWt: 0, packsPerBox: 1, weightPerPackG: 0 }]);
+  // Weights are typed in grams per box here (netWtG / grossWtG); the party form
+  // turns them into the kilograms that are stored when it saves.
+  const add = () => setProducts([...products, { id: tempId(), name: "", hsn: "", rate: 0, mrp: 0, netWtG: 0, grossWtG: 0, packsPerBox: 1, weightPerPackG: 0 }]);
   return (
     <div className={panel + " overflow-x-auto"}>
       <table className="w-full">
@@ -548,8 +550,8 @@ function ProductRows({ products, setProducts, mode }) {
           <tr>
             <th className={th}>Product</th><th className={th}>HSN</th>
             <th className={th}>{mode === "international" ? "Rate / box" : "MRP / box"}</th>
-            <th className={th}>Net wt</th><th className={th}>Gross wt</th>
-            <th className={th}>Packs / box</th><th className={th}>g / pack</th><th></th>
+            <th className={th}>Net wt / box (g)</th><th className={th}>Gross wt / box (g)</th>
+            <th className={th}>Packs / box</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -562,10 +564,9 @@ function ProductRows({ products, setProducts, mode }) {
                   ? <input type="number" step="0.01" className={input} value={p.rate} onChange={(e) => update(p.id, "rate", e.target.value)} />
                   : <input type="number" step="0.01" className={input} value={p.mrp} onChange={(e) => update(p.id, "mrp", e.target.value)} />}
               </td>
-              <td className="px-2 py-1.5"><input type="number" step="0.001" className={input} value={p.netWt} onChange={(e) => update(p.id, "netWt", e.target.value)} /></td>
-              <td className="px-2 py-1.5"><input type="number" step="0.001" className={input} value={p.grossWt} onChange={(e) => update(p.id, "grossWt", e.target.value)} /></td>
-              <td className="px-2 py-1.5"><input type="number" className={input} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} /></td>
-              <td className="px-2 py-1.5"><input type="number" className={input} value={p.weightPerPackG} onChange={(e) => update(p.id, "weightPerPackG", e.target.value)} /></td>
+              <td className="px-2 py-1.5"><input type="number" step="1" min="0" aria-label="Net weight per box in grams" className={input} value={p.netWtG} onChange={(e) => update(p.id, "netWtG", e.target.value)} /></td>
+              <td className="px-2 py-1.5"><input type="number" step="1" min="0" aria-label="Gross weight per box in grams" className={input} value={p.grossWtG} onChange={(e) => update(p.id, "grossWtG", e.target.value)} /></td>
+              <td className="px-2 py-1.5"><input type="number" aria-label="Packs per box" className={input} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} /></td>
               <td className="px-2">
                 <button onClick={() => setProducts(products.filter((x) => x.id !== p.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" /></button>
               </td>
@@ -588,7 +589,8 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
     shipmentTerm: "", paymentTerm: "", conditions: "", portOfLoading: "", destinationPort: "",
     consigneeOptions: [], altBuyers: [],
   });
-  const [products, setProducts] = useState(initial ? initial.products : []);
+  const [products, setProducts] = useState(() => (initial ? initial.products : [])
+    .map((p) => ({ ...p, netWtG: gramsFromKg(p.netWt), grossWtG: gramsFromKg(p.grossWt) })));
   const set = (k, v) => setF({ ...f, [k]: v });
   const altBuyers = f.altBuyers || [];
   const setAlt = (i, k, v) => set("altBuyers", altBuyers.map((b, j) => (j === i ? { ...b, [k]: v } : b)));
@@ -650,7 +652,9 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
         <button
           onClick={() => {
             const consigneeOptions = Array.from(new Set([...(f.consigneeOptions || []), f.consigneeName].filter(Boolean)));
-            onSave(isEdit ? { ...f, products, consigneeOptions } : { id: tempId(), ...f, products, consigneeOptions });
+            // Typed in grams per box, stored in kilograms per box.
+            const lines = products.map(({ netWtG, grossWtG, ...p }) => ({ ...p, netWt: kgFromGrams(netWtG), grossWt: kgFromGrams(grossWtG) }));
+            onSave(isEdit ? { ...f, products: lines, consigneeOptions } : { id: tempId(), ...f, products: lines, consigneeOptions });
           }}
           className={btn}
         >
@@ -1156,22 +1160,71 @@ function QuotationsPage() {
   );
 }
 
+/* -------------------------------------------------------------- drafts */
+/* A draft is a form saved part-way (db/012): no number, nothing issued.
+   Anyone who holds the section can continue or discard one.               */
+function DraftList({ drafts, onResume, onDiscard }) {
+  const [confirmId, setConfirmId] = useState(null);
+  if (!drafts.length) return null;
+  return (
+    <div className={card + " mb-6 p-5"}>
+      <p className="mb-1 text-sm font-medium">Saved drafts</p>
+      <p className="mb-4 text-xs text-[var(--muted)]">
+        Not issued yet — a number is only taken when the document is created. Anyone with access to this section can continue a draft.
+      </p>
+      <div className="space-y-2">
+        {drafts.map((d) => (
+          <div key={d.id} className={panel + " flex items-center justify-between gap-4 px-4 py-3"}>
+            <div>
+              <p className="text-sm font-medium">{d.title} <span className="ml-2"><Chip tone="warn">Draft</Chip></span></p>
+              <p className="text-xs text-[var(--muted)]">Saved by {d.savedBy || "—"} · {fmtWhen(d.updatedAt)}</p>
+            </div>
+            {confirmId === d.id ? (
+              <span className="flex items-center gap-3">
+                <span className="text-xs text-[var(--status-danger)]">Discard this draft?</span>
+                <button onClick={() => { setConfirmId(null); onDiscard(d); }} className="text-xs text-[var(--status-danger)]">Confirm</button>
+                <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--muted)]">Keep</button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-4">
+                <button onClick={() => onResume(d)} className="flex items-center gap-1 text-sm text-[var(--accent)]">
+                  Continue draft <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => setConfirmId(d.id)} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Discard</button>
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------ proforma */
-function ProformaForm({ type, onSave, onCancel }) {
+function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
   const { store } = useApp();
   const eligible = store.parties.filter((p) => p.type === type);
-  const [partyId, setPartyId] = useState(eligible.length ? eligible[0].id : "");
+  // Continuing a draft: the form starts as it was left. If the party it was for
+  // is no longer on file its product lines cannot be trusted, so they are dropped.
+  const saved = (draft && draft.payload) || {};
+  const savedParty = eligible.find((p) => p.id === saved.partyId);
+  const partyGone = Boolean(draft) && Boolean(saved.partyId) && !savedParty;
+  // The names are found again by name and address, not by position: the party
+  // may have been edited since the draft was saved.
+  const savedAt = (who) => (savedParty && who
+    ? partyNames(savedParty).findIndex((c) => c.name === who.name && c.address === who.address) : -1);
+  const [partyId, setPartyId] = useState(savedParty ? savedParty.id : eligible.length ? eligible[0].id : "");
   const party = store.parties.find((p) => p.id === partyId);
-  const [quotationRef, setQuotationRef] = useState("");
-  const [orderNo, setOrderNo] = useState("");
-  const [orderDate, setOrderDate] = useState(todayIST());
-  const [items, setItems] = useState([]);
-  const [extra, setExtra] = useState("");
-  const [taxRate, setTaxRate] = useState(5);
+  const [quotationRef, setQuotationRef] = useState(saved.quotationRef || "");
+  const [orderNo, setOrderNo] = useState(saved.orderNo || "");
+  const [orderDate, setOrderDate] = useState(saved.orderDate || todayIST());
+  const [items, setItems] = useState(savedParty && Array.isArray(saved.items) ? saved.items : []);
+  const [extra, setExtra] = useState(saved.extra || "");
+  const [taxRate, setTaxRate] = useState(saved.taxRate ?? 5);
   // Which of the party's names is the buyer on this proforma (0 is the main
   // one) and which is the consignee (null = the party's own consignee).
-  const [buyerIdx, setBuyerIdx] = useState(0);
-  const [consigneeIdx, setConsigneeIdx] = useState(null);
+  const [buyerIdx, setBuyerIdx] = useState(Math.max(0, savedAt(saved.buyer)));
+  const [consigneeIdx, setConsigneeIdx] = useState(savedAt(saved.consignee) >= 0 ? savedAt(saved.consignee) : null);
   const isIntl = type === "international";
   const choices = partyNames(party);
   const nobody = { name: "", address: "" };
@@ -1209,7 +1262,13 @@ function ProformaForm({ type, onSave, onCancel }) {
   return (
     <div className={card + " mb-6 p-6"}>
       <div className="mb-5 flex items-start justify-between">
-        <p className="font-display text-lg">New {isIntl ? "international" : "private-label / merchant-export"} proforma</p>
+        <div>
+          <p className="font-display text-lg">
+            {draft ? "Draft" : "New"} {isIntl ? "international" : "private-label / merchant-export"} proforma
+          </p>
+          {draft && <p className="mt-1 text-xs text-[var(--muted)]">Continuing the draft saved by {draft.savedBy || "—"} · {fmtWhen(draft.updatedAt)}</p>}
+          {partyGone && <p className="mt-1 text-xs text-[var(--status-warn)]">The party this draft was for is no longer on file, so its product lines were cleared. Pick a party to continue.</p>}
+        </div>
         <button onClick={onCancel}><X className="h-4 w-4 text-[var(--muted)]" /></button>
       </div>
 
@@ -1314,6 +1373,16 @@ function ProformaForm({ type, onSave, onCancel }) {
         </div>
         <div className="flex gap-3">
           <button onClick={onCancel} className={btnGhost}>Cancel</button>
+          {onSaveDraft && (
+            <button className={btnGhost} onClick={() => onSaveDraft({
+              title: [buyer.name, orderNo ? "order " + orderNo : "", totalBoxes + " boxes"].filter(Boolean).join(" · "),
+              payload: {
+                type, partyId, quotationRef, orderNo, orderDate, items, extra, taxRate,
+                buyer: { name: buyer.name, address: buyer.address },
+                consignee: consigneeIdx === null || !choices[consigneeIdx] ? null : { name: consignee.name, address: consignee.address },
+              },
+            })}>Save draft</button>
+          )}
           <button className={btn} onClick={() => onSave({
             id: tempId(), type, date: todayIST(), partyId, quotationRef,
             buyerName: buyer.name, buyerAddress: buyer.address,
@@ -1335,18 +1404,45 @@ function ProformaForm({ type, onSave, onCancel }) {
 
 function ProformaPage() {
   const { store, refresh } = useApp();
-  const [form, setForm] = useState(null);
+  const [form, setForm] = useState(null);           // null | { type, draft }
   const [tab, setTab] = useState("open");
   const [saveError, setSaveError] = useState("");
+  const [notice, setNotice] = useState("");
   const list = tab === "open" ? store.pis.filter((p) => !p.linkedFinalInvoiceId) : store.pis;
+  const drafts = store.drafts.filter((d) => d.kind === "proforma");
+  const open = (type, draft = null) => { setSaveError(""); setNotice(""); setForm({ type, draft }); };
 
+  // From a draft, the proforma and the draft's retirement are one transaction.
   const createProforma = async (pi) => {
     const message = await attempt(async () => {
-      await call("create_proforma", { p: pick(pi, PROFORMA_KEYS) });
+      if (form && form.draft) await call("raise_from_draft", { p_draft: form.draft.id, p: pick(pi, PROFORMA_KEYS) });
+      else await call("create_proforma", { p: pick(pi, PROFORMA_KEYS) });
       await refresh();
     });
     setSaveError(message);
     if (!message) setForm(null);
+  };
+
+  const saveDraft = async ({ title, payload }) => {
+    const from = form && form.draft;
+    const message = await attempt(async () => {
+      await call("save_draft", { p: pick({
+        kind: "proforma", title, payload,
+        id: from ? from.id : undefined, expectedUpdatedAt: from ? from.updatedAt : undefined,
+      }, DRAFT_KEYS) });
+      await refresh();
+    });
+    setSaveError(message);
+    if (!message) { setForm(null); setNotice("Draft saved. It is listed under Saved drafts — no proforma number has been taken."); }
+  };
+
+  const discardDraft = async (d) => {
+    const message = await attempt(async () => {
+      await call("delete_draft", { p_id: d.id });
+      await refresh();
+    });
+    setSaveError(message);
+    if (!message) setNotice("Draft discarded.");
   };
 
   const unitsOf = (pi) => (pi.items || []).reduce((s, i) => s + unitsFromBoxes(i.boxQty, i.packsPerBox), 0);
@@ -1377,13 +1473,19 @@ function ProformaPage() {
         </div>
         <div className="flex items-center gap-3">
           <ExcelButton name="proforma-invoices" columns={excelColumns} rows={list} />
-          <button onClick={() => setForm("international")} className={btn + " flex items-center gap-1.5"}><Plus className="h-4 w-4" /> International</button>
-          <button onClick={() => setForm("domestic")} className={btnGhost + " flex items-center gap-1.5 py-2"}><Plus className="h-4 w-4" /> Private label</button>
+          <button onClick={() => open("international")} className={btn + " flex items-center gap-1.5"}><Plus className="h-4 w-4" /> International</button>
+          <button onClick={() => open("domestic")} className={btnGhost + " flex items-center gap-1.5 py-2"}><Plus className="h-4 w-4" /> Private label</button>
         </div>
       </div>
 
-      <div aria-live="polite">{saveError && <p className={errText + " mb-4"}>{saveError}</p>}</div>
-      {form && <ProformaForm key={form} type={form} onCancel={() => setForm(null)} onSave={createProforma} />}
+      <div aria-live="polite">
+        {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
+        {notice && !saveError && <p className="mb-4 text-sm text-[var(--status-ok)]">{notice}</p>}
+      </div>
+      {form && <ProformaForm key={form.type + (form.draft ? form.draft.id : "")} type={form.type} draft={form.draft}
+        onCancel={() => setForm(null)} onSave={createProforma} onSaveDraft={saveDraft} />}
+      {!form && <DraftList drafts={drafts} onDiscard={discardDraft}
+        onResume={(d) => open(d.payload.type === "domestic" ? "domestic" : "international", d)} />}
 
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
@@ -1420,24 +1522,28 @@ function ProformaPage() {
 }
 
 /* ----------------------------------------------------------- shipments */
-function ShipmentForm({ pi, onSave, onCancel, error }) {
+function ShipmentForm({ pi, draft, onSave, onSaveDraft, onCancel, error }) {
   const needsRate = pi.currency !== "INR";
-  const [exchangeRate, setExchangeRate] = useState(needsRate ? "" : "1");
-  const [containerNo, setContainerNo] = useState("");
-  const [vehicleNo, setVehicleNo] = useState("");
-  const [customSeal, setCustomSeal] = useState("");
-  const [lineSeal, setLineSeal] = useState("");
-  const [portOfLoading, setPortOfLoading] = useState(pi.portOfLoading || "");
-  const [incoterm, setIncoterm] = useState(pi.shipmentTerm || "FOB");
-  const [gstPercent, setGstPercent] = useState(0);
-  const [roundOff, setRoundOff] = useState(0);
-  const [freight, setFreight] = useState(0);
-  const [otherAdj, setOtherAdj] = useState(0);
-  const [otherReason, setOtherReason] = useState("");
-  const [taxConsignee, setTaxConsignee] = useState("TO THE ORDER");
-  const [commercialCurrency, setCommercialCurrency] = useState(pi.currency);
-  const [commercialConsignee, setCommercialConsignee] = useState(pi.consigneeName);
-  const [items, setItems] = useState(pi.items.map((i) => ({ ...i, batchNo: "", mfgDate: todayIST(), expDate: "" })));
+  // Continuing a draft: every field starts as it was left.
+  const saved = (draft && draft.payload) || {};
+  const [exchangeRate, setExchangeRate] = useState(saved.exchangeRate ?? (needsRate ? "" : "1"));
+  const [containerNo, setContainerNo] = useState(saved.containerNo || "");
+  const [vehicleNo, setVehicleNo] = useState(saved.vehicleNo || "");
+  const [customSeal, setCustomSeal] = useState(saved.customSeal || "");
+  const [lineSeal, setLineSeal] = useState(saved.lineSeal || "");
+  const [portOfLoading, setPortOfLoading] = useState(saved.portOfLoading ?? (pi.portOfLoading || ""));
+  const [incoterm, setIncoterm] = useState(saved.incoterm || pi.shipmentTerm || "FOB");
+  const [gstPercent, setGstPercent] = useState(saved.gstPercent ?? 0);
+  const [roundOff, setRoundOff] = useState(saved.roundOff ?? 0);
+  const [freight, setFreight] = useState(saved.freight ?? 0);
+  const [otherAdj, setOtherAdj] = useState(saved.otherAdj ?? 0);
+  const [otherReason, setOtherReason] = useState(saved.otherReason || "");
+  const [taxConsignee, setTaxConsignee] = useState(saved.taxConsignee ?? "TO THE ORDER");
+  const [commercialCurrency, setCommercialCurrency] = useState(saved.commercialCurrency || pi.currency);
+  const [commercialConsignee, setCommercialConsignee] = useState(saved.commercialConsignee ?? pi.consigneeName);
+  const [items, setItems] = useState(Array.isArray(saved.items) && saved.items.length
+    ? saved.items
+    : pi.items.map((i) => ({ ...i, batchNo: "", mfgDate: todayIST(), expDate: "" })));
   const [busy, setBusy] = useState(false);
 
   const upd = (id, k, v) => setItems(items.map((i) => (i.id === id ? { ...i, [k]: v } : i)));
@@ -1448,13 +1554,22 @@ function ShipmentForm({ pi, onSave, onCancel, error }) {
   });
   const missingWeights = items.some((i) => !toNumber(i.netWt) || !toNumber(i.grossWt));
 
+  // One description of the form, used both to raise the shipment and to save it as a draft.
+  const current = () => ({
+    piId: pi.id, items, freight, otherAdj, otherReason, gstPercent, roundOff, exchangeRate,
+    commercialCurrency, commercialConsignee, taxConsignee,
+    containerNo, vehicleNo, customSeal, lineSeal, portOfLoading, incoterm,
+  });
+
   const submit = async () => {
     setBusy(true);
-    await onSave({
-      piId: pi.id, items, freight, otherAdj, otherReason, gstPercent, roundOff, exchangeRate,
-      commercialCurrency, commercialConsignee, taxConsignee,
-      containerNo, vehicleNo, customSeal, lineSeal, portOfLoading, incoterm,
-    });
+    await onSave(current());
+    setBusy(false);
+  };
+
+  const saveAsDraft = async () => {
+    setBusy(true);
+    await onSaveDraft({ title: `${pi.docNo} · ${pi.buyerName}`, refId: pi.id, payload: current() });
     setBusy(false);
   };
 
@@ -1462,7 +1577,8 @@ function ShipmentForm({ pi, onSave, onCancel, error }) {
     <div className={card + " mb-6 p-6"}>
       <div className="mb-5 flex items-start justify-between">
         <div>
-          <p className="font-display text-lg">Shipment against {pi.docNo}</p>
+          <p className="font-display text-lg">{draft ? "Draft shipment" : "Shipment"} against {pi.docNo}</p>
+          {draft && <p className="mt-1 text-xs text-[var(--muted)]">Continuing the draft saved by {draft.savedBy || "—"} · {fmtWhen(draft.updatedAt)}</p>}
           <p className="mt-1 text-xs text-[var(--muted)]">
             {pi.buyerName} · order {pi.buyerOrderNo || "—"} of {fmtDate(pi.buyerOrderDate)} · one pass produces the tax invoice, commercial invoice and packing list.
           </p>
@@ -1584,6 +1700,7 @@ function ShipmentForm({ pi, onSave, onCancel, error }) {
       <div className="flex items-center justify-end gap-3">
         <span aria-live="polite" className={errText}>{error}</span>
         <button onClick={onCancel} className={btnGhost}>Cancel</button>
+        {onSaveDraft && <button onClick={saveAsDraft} disabled={busy} className={btnGhost}>Save draft</button>}
         <button onClick={submit} disabled={busy} className={btn}>{busy ? "Saving…" : "Generate document set"}</button>
       </div>
     </div>
@@ -1593,21 +1710,52 @@ function ShipmentForm({ pi, onSave, onCancel, error }) {
 function ShipmentsPage() {
   const { store, refresh } = useApp();
   const [formPiId, setFormPiId] = useState(null);
+  const [formDraft, setFormDraft] = useState(null);   // the draft the open form was started from
+  const [confirmDraftId, setConfirmDraftId] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [saveError, setSaveError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const openPis = store.pis.filter((p) => !p.linkedFinalInvoiceId);
   const pi = formPiId ? store.pis.find((p) => p.id === formPiId) : null;
   const detail = detailId ? store.finalInvoices.find((f) => f.id === detailId) : null;
+  // At most one live shipment draft per proforma (db/012).
+  const draftFor = (piId) => store.drafts.find((d) => d.kind === "shipment" && d.refId === piId) || null;
+  const openForm = (p) => { setSaveError(""); setNotice(""); setFormDraft(draftFor(p.id)); setFormPiId(p.id); };
 
-  // Invoice number, shipment row and "proforma is now invoiced" are one transaction.
+  // Invoice number, shipment row and "proforma is now invoiced" are one
+  // transaction — and so is retiring the draft, when there is one.
   const createShipment = async (payload) => {
+    const from = formDraft || draftFor(payload.piId);
     const message = await attempt(async () => {
-      await call("create_shipment", { p: pick(payload, SHIPMENT_KEYS) });
+      if (from) await call("raise_from_draft", { p_draft: from.id, p: pick(payload, SHIPMENT_KEYS) });
+      else await call("create_shipment", { p: pick(payload, SHIPMENT_KEYS) });
       await refresh();
     });
     setSaveError(message);
     if (!message) setFormPiId(null);
+  };
+
+  const saveDraft = async ({ title, refId, payload }) => {
+    const message = await attempt(async () => {
+      await call("save_draft", { p: pick({
+        kind: "shipment", title, refId, payload,
+        id: formDraft ? formDraft.id : undefined, expectedUpdatedAt: formDraft ? formDraft.updatedAt : undefined,
+      }, DRAFT_KEYS) });
+      await refresh();
+    });
+    setSaveError(message);
+    if (!message) { setFormPiId(null); setNotice("Draft saved. The proforma stays open and no invoice number has been taken."); }
+  };
+
+  const discardDraft = async (d) => {
+    setConfirmDraftId(null);
+    const message = await attempt(async () => {
+      await call("delete_draft", { p_id: d.id });
+      await refresh();
+    });
+    setSaveError(message);
+    if (!message) setNotice("Draft discarded.");
   };
 
   const excelColumns = [
@@ -1637,23 +1785,46 @@ function ShipmentsPage() {
         <div className={card + " mb-6 p-5"}>
           <p className="mb-4 text-sm font-medium">Pick the proforma this shipment is against</p>
           {openPis.length === 0 && <p className="text-sm text-[var(--muted)]">No open proforma invoices — raise one under Proforma first.</p>}
+          <div aria-live="polite">
+            {saveError && <p className={errText + " mb-3"}>{saveError}</p>}
+            {notice && !saveError && <p className="mb-3 text-sm text-[var(--status-ok)]">{notice}</p>}
+          </div>
           <div className="space-y-2">
-            {openPis.map((p) => (
-              <div key={p.id} className={panel + " flex items-center justify-between px-4 py-3"}>
-                <div>
-                  <p className="text-sm font-medium">{p.buyerName} <span className="ml-2 font-num text-xs text-[var(--muted)]">{p.docNo}</span></p>
-                  <p className="text-xs text-[var(--muted)]">{fmtMoney(p.grandTotal, p.currency)} · {p.totalBoxes} boxes · raised {fmtDate(p.date)}</p>
+            {openPis.map((p) => {
+              const d = draftFor(p.id);
+              return (
+                <div key={p.id} className={panel + " flex items-center justify-between gap-4 px-4 py-3"}>
+                  <div>
+                    <p className="text-sm font-medium">
+                      {p.buyerName} <span className="ml-2 font-num text-xs text-[var(--muted)]">{p.docNo}</span>
+                      {d && <span className="ml-2"><Chip tone="warn">Draft</Chip></span>}
+                    </p>
+                    <p className="text-xs text-[var(--muted)]">{fmtMoney(p.grandTotal, p.currency)} · {p.totalBoxes} boxes · raised {fmtDate(p.date)}</p>
+                    {d && <p className="text-xs text-[var(--muted)]">Draft saved by {d.savedBy || "—"} · {fmtWhen(d.updatedAt)}</p>}
+                  </div>
+                  {d && confirmDraftId === d.id ? (
+                    <span className="flex items-center gap-3">
+                      <span className="text-xs text-[var(--status-danger)]">Discard this draft?</span>
+                      <button onClick={() => discardDraft(d)} className="text-xs text-[var(--status-danger)]">Confirm</button>
+                      <button onClick={() => setConfirmDraftId(null)} className="text-xs text-[var(--muted)]">Keep</button>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-4">
+                      <button onClick={() => openForm(p)} className="flex items-center gap-1 text-sm text-[var(--accent)]">
+                        {d ? "Continue draft" : "Create shipment"} <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                      {d && <button onClick={() => setConfirmDraftId(d.id)} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Discard draft</button>}
+                    </span>
+                  )}
                 </div>
-                <button onClick={() => { setSaveError(""); setFormPiId(p.id); }} className="flex items-center gap-1 text-sm text-[var(--accent)]">
-                  Create shipment <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
-      {pi && <ShipmentForm key={pi.id} pi={pi} error={saveError} onCancel={() => setFormPiId(null)} onSave={createShipment} />}
+      {pi && <ShipmentForm key={pi.id + (formDraft ? formDraft.id : "")} pi={pi} draft={formDraft} error={saveError}
+        onCancel={() => setFormPiId(null)} onSave={createShipment} onSaveDraft={saveDraft} />}
 
       <div className="mb-3 flex justify-end">
         <ExcelButton name="shipments" columns={excelColumns} rows={store.finalInvoices} />

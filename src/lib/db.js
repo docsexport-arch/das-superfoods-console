@@ -183,10 +183,18 @@ export const auditFromRow = (r) => ({
 });
 
 /* ------------------------------------------------------------------ reads */
+/* A saved draft is a form kept as it was left (db/012). The payload is the
+   form's own state; a row whose payload is not an object reads as empty.    */
+export const draftFromRow = (r) => ({
+  id: r.id, kind: r.kind, title: r.title || "", refId: r.ref_id || null,
+  payload: r.payload && typeof r.payload === "object" && !Array.isArray(r.payload) ? r.payload : {},
+  savedBy: r.saved_by || "", updatedAt: r.updated_at,
+});
+
 export const emptyStore = () => ({
   users: [],
   company: { name: "", address: "", bankName: "", accountNo: "", ifsc: "", swift: "", gstNo: "", iecCode: "" },
-  parties: [], quotations: [], pis: [], finalInvoices: [], audit: [], migrationIds: [],
+  parties: [], quotations: [], pis: [], finalInvoices: [], drafts: [], audit: [], migrationIds: [],
 });
 
 // One grant per toolbar section. This list is the client half of the check
@@ -238,6 +246,12 @@ export async function fetchStore(profile) {
   if (can.proforma || can.shipments) {
     jobs.push(readAll("proformas", { order: NEWEST_FIRST, liveOnly: true })
       .then((rows) => { out.pis = rows.map(proformaFromRow); }));
+  }
+  // Drafts are read by the same two grants; row-level security returns only
+  // the kind each grant covers.
+  if (can.proforma || can.shipments) {
+    jobs.push(readAll("drafts", { order: [["updated_at", false], ["id", true]], liveOnly: true })
+      .then((rows) => { out.drafts = rows.map(draftFromRow); }));
   }
   if (can.shipments) {
     jobs.push(readAll("shipments", { order: NEWEST_FIRST, liveOnly: true })

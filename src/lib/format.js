@@ -121,6 +121,12 @@ export function amountInWords(value, currency) {
   return `${wordsInternational(whole)}${frac ? ` and ${String(frac).padStart(2, "0")}/100` : ""} only`;
 }
 
+// Weights are STORED in kilograms per box — the packing list and every total
+// are in kg. The party form takes them in grams, so it converts on the way in
+// and on the way out. Rounded so 1360 g is 1.36 kg, not 1.3599999.
+export const gramsFromKg = (kg) => Math.round(toNumber(kg) * 1e6) / 1e3;
+export const kgFromGrams = (g) => Math.round(toNumber(g) * 1e3) / 1e6;
+
 // A short random id for rows that only exist on screen. The database never
 // sees these as identities — a non-uuid id is how it recognises a new row.
 export const tempId = () => Math.random().toString(36).slice(2, 10);

@@ -34,6 +34,9 @@ export const COMPANY_KEYS = [
   "name", "address", "bankName", "accountNo", "ifsc", "swift", "gstNo", "iecCode",
 ];
 export const USER_ACCESS_KEYS = ["role", "fullName", "active", "sections"];
+// A saved draft. `payload` is the form's own state and is stored as it is —
+// the document functions validate it when the document is raised.
+export const DRAFT_KEYS = ["id", "kind", "title", "refId", "payload", "expectedUpdatedAt"];
 
 // Which function each list is sent to — used by the contract test.
 export const RPC_CONTRACT = {
@@ -43,6 +46,7 @@ export const RPC_CONTRACT = {
   create_shipment: SHIPMENT_KEYS,
   save_company: COMPANY_KEYS,
   set_user_access: USER_ACCESS_KEYS,
+  save_draft: DRAFT_KEYS,
 };
 
 // Copies only the named keys, skipping any that are undefined.
