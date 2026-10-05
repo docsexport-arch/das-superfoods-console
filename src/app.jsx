@@ -8,7 +8,7 @@ import {
   Download, TriangleAlert, Search, Sun, Moon,
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
-import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, buyerChoices, withTimeout, humanise } from "./lib/db.js";
+import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, partyNames, withTimeout, humanise } from "./lib/db.js";
 import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
@@ -626,21 +626,21 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
         )}
       </div>
       <div className="mb-5">
-        <p className="mb-1 text-sm font-medium">Other buyer names</p>
+        <p className="mb-1 text-sm font-medium">Other buyer and consignee names</p>
         <p className="mb-3 text-xs text-[var(--muted)]">
-          For when this party places an order under a different name. Whoever raises the quotation or proforma picks which name and address go on it.
+          Every name on this party — the buyer, the consignee and any added here — can be picked as the buyer or as the consignee when a quotation or proforma is raised.
         </p>
         {altBuyers.map((b, i) => (
           <div key={i} className="mb-2 grid items-end gap-3 md:grid-cols-[1fr_2fr_auto]">
-            <Field label={`Buyer name ${i + 2}`}><input className={input} value={b.name} onChange={(e) => setAlt(i, "name", e.target.value)} /></Field>
-            <Field label={`Buyer address ${i + 2}`}><input className={input} value={b.address} onChange={(e) => setAlt(i, "address", e.target.value)} /></Field>
-            <button type="button" className="mb-2.5" aria-label={`Remove buyer name ${i + 2}`} onClick={() => set("altBuyers", altBuyers.filter((_, j) => j !== i))}>
+            <Field label={`Other name ${i + 1}`}><input className={input} value={b.name} onChange={(e) => setAlt(i, "name", e.target.value)} /></Field>
+            <Field label={`Address ${i + 1}`}><input className={input} value={b.address} onChange={(e) => setAlt(i, "address", e.target.value)} /></Field>
+            <button type="button" className="mb-2.5" aria-label={`Remove other name ${i + 1}`} onClick={() => set("altBuyers", altBuyers.filter((_, j) => j !== i))}>
               <Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" />
             </button>
           </div>
         ))}
         <button type="button" className={btnGhost + " flex items-center gap-1.5"} onClick={() => set("altBuyers", [...altBuyers, { name: "", address: "" }])}>
-          <Plus className="h-4 w-4" /> Add another buyer name
+          <Plus className="h-4 w-4" /> Add another name
         </button>
       </div>
       <p className="mb-2 text-sm font-medium">Products</p>
@@ -699,7 +699,7 @@ function PartiesPage() {
   const priceList = store.parties.flatMap((p) => (p.products.length ? p.products : [null]).map((prod) => ({ p, prod })));
   const excelColumns = [
     { label: "Buyer", value: (r) => r.p.buyerName, width: 32 },
-    { label: "Other buyer names", value: (r) => (r.p.altBuyers || []).map((b) => (b.address ? `${b.name} — ${b.address}` : b.name)).join("; "), width: 40 },
+    { label: "Other names", value: (r) => (r.p.altBuyers || []).map((b) => (b.address ? `${b.name} — ${b.address}` : b.name)).join("; "), width: 40 },
     { label: "Type", value: (r) => r.p.type },
     { label: "Country", value: (r) => r.p.country },
     { label: "Currency", value: (r) => r.p.currency, width: 10 },
@@ -759,7 +759,7 @@ function PartiesPage() {
                 <td className={td + " font-medium"}>
                   {p.buyerName}
                   {(p.altBuyers || []).length > 0 && (
-                    <span className="block text-xs font-normal text-[var(--muted)]">Also orders as: {p.altBuyers.map((b) => b.name).join(" · ")}</span>
+                    <span className="block text-xs font-normal text-[var(--muted)]">Other names: {p.altBuyers.map((b) => b.name).join(" · ")}</span>
                   )}
                 </td>
                 <td className={td + " text-[var(--muted)]"}>{p.country}</td>
@@ -916,9 +916,11 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
   const isDomestic = totals.domestic;
   const total = totals.total, igstAmt = totals.tax, grand = totals.grand;
   const updateItem = (id, k, v) => setItems(items.map((i) => (i.id === id ? { ...i, [k]: v } : i)));
-  // Every name the chosen party orders under; the picker only shows when there is more than one.
-  const choices = buyerChoices(store.parties.find((x) => x.id === partyId));
-  const chosen = choices.findIndex((c) => c.name === buyerName);
+  // Every name on the chosen party — buyer, other names, consignee. The picker
+  // only shows when there is more than one.
+  const choices = partyNames(store.parties.find((x) => x.id === partyId));
+  const exact = choices.findIndex((c) => c.name === buyerName.trim() && c.address === buyerAddress.trim());
+  const chosen = exact >= 0 ? exact : choices.findIndex((c) => c.name === buyerName.trim());
 
   const submit = async () => {
     if (!buyerName.trim()) return setError("Buyer name is required.");
@@ -947,13 +949,13 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
           </select>
         </Field>
         {choices.length > 1 && (
-          <Field label="Name on this quotation" hint="This party orders under more than one name">
+          <Field label="Buyer on this quotation" hint="Any name on this party can be the buyer">
             <select className={input} value={chosen} onChange={(e) => {
               const c = choices[Number(e.target.value)];
               if (c) { setBuyerName(c.name); setBuyerAddress(c.address); setError(""); }
             }}>
               {chosen < 0 && <option value={-1}>Typed by hand</option>}
-              {choices.map((c, i) => <option key={i} value={i}>{c.name}</option>)}
+              {choices.map((c, i) => <option key={i} value={i}>{c.label}</option>)}
             </select>
           </Field>
         )}
@@ -1166,11 +1168,18 @@ function ProformaForm({ type, onSave, onCancel }) {
   const [items, setItems] = useState([]);
   const [extra, setExtra] = useState("");
   const [taxRate, setTaxRate] = useState(5);
-  // Which of the party's names this proforma is raised in — 0 is the main one.
+  // Which of the party's names is the buyer on this proforma (0 is the main
+  // one) and which is the consignee (null = the party's own consignee).
   const [buyerIdx, setBuyerIdx] = useState(0);
+  const [consigneeIdx, setConsigneeIdx] = useState(null);
   const isIntl = type === "international";
-  const choices = buyerChoices(party);
-  const buyer = choices[buyerIdx] || choices[0] || { name: "", address: "" };
+  const choices = partyNames(party);
+  const nobody = { name: "", address: "" };
+  const buyer = choices[buyerIdx] || choices[0] || nobody;
+  const ownConsignee = choices.findIndex((c) => c.isConsignee);
+  const consigneeAt = consigneeIdx === null ? ownConsignee : consigneeIdx;
+  const consignee = choices[consigneeAt] || nobody;
+  const consigneeLabel = isIntl ? "Consignee" : "Manufactured by / ship to";
 
   if (!party) {
     return (
@@ -1206,16 +1215,24 @@ function ProformaForm({ type, onSave, onCancel }) {
 
       <div className="mb-5 grid gap-4 md:grid-cols-4">
         <Field label="Party">
-          <select className={input} value={partyId} onChange={(e) => { setPartyId(e.target.value); setItems([]); setBuyerIdx(0); }}>
+          <select className={input} value={partyId} onChange={(e) => { setPartyId(e.target.value); setItems([]); setBuyerIdx(0); setConsigneeIdx(null); }}>
             {eligible.map((p) => <option key={p.id} value={p.id}>{p.buyerName}</option>)}
           </select>
         </Field>
         {choices.length > 1 && (
-          <Field label="Name on this proforma" hint="This party orders under more than one name">
-            <select className={input} value={buyerIdx} onChange={(e) => setBuyerIdx(Number(e.target.value))}>
-              {choices.map((c, i) => <option key={i} value={i}>{c.name}</option>)}
-            </select>
-          </Field>
+          <React.Fragment>
+            <Field label="Buyer on this proforma" hint="Any name on this party can be the buyer">
+              <select className={input} value={buyerIdx} onChange={(e) => setBuyerIdx(Number(e.target.value))}>
+                {choices.map((c, i) => <option key={i} value={i}>{c.label}</option>)}
+              </select>
+            </Field>
+            <Field label={isIntl ? "Consignee on this proforma" : "Ship to on this proforma"} hint="Any name on this party can be the consignee">
+              <select className={input} value={consigneeAt} onChange={(e) => setConsigneeIdx(Number(e.target.value))}>
+                {ownConsignee < 0 && <option value={-1}>Not set</option>}
+                {choices.map((c, i) => <option key={i} value={i}>{c.label}</option>)}
+              </select>
+            </Field>
+          </React.Fragment>
         )}
         <Field label="Order no."><input className={input} value={orderNo} onChange={(e) => setOrderNo(e.target.value)} /></Field>
         <Field label="Order date"><input type="date" className={input} value={orderDate} onChange={(e) => setOrderDate(e.target.value)} /></Field>
@@ -1230,12 +1247,12 @@ function ProformaForm({ type, onSave, onCancel }) {
 
       <div className={panel + " mb-5 grid gap-4 p-4 text-xs md:grid-cols-4"}>
         <div>
-          <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Buyer on this proforma</p>
+          <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Buyer</p>
           <p>{buyer.name}</p><p className="text-[var(--muted)]">{buyer.address}</p>
         </div>
         <div>
-          <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">{isIntl ? "Consignee" : "Manufactured by / ship to"}</p>
-          <p>{party.consigneeName}</p><p className="text-[var(--muted)]">{party.consigneeAddress}</p>
+          <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">{consigneeLabel}</p>
+          <p>{consignee.name || "—"}</p><p className="text-[var(--muted)]">{consignee.address}</p>
         </div>
         <div>
           <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Ports</p>
@@ -1300,8 +1317,10 @@ function ProformaForm({ type, onSave, onCancel }) {
           <button className={btn} onClick={() => onSave({
             id: tempId(), type, date: todayIST(), partyId, quotationRef,
             buyerName: buyer.name, buyerAddress: buyer.address,
-            consigneeName: party.consigneeName, consigneeAddress: party.consigneeAddress,
-            consigneeOptions: party.consigneeOptions || [party.consigneeName],
+            consigneeName: consignee.name, consigneeAddress: consignee.address,
+            // Every name on the party travels with the proforma, so the shipment
+            // form can still name any of them as the consignee.
+            consigneeOptions: Array.from(new Set([...choices.map((c) => c.name), ...(party.consigneeOptions || [])].filter(Boolean))),
             portOfLoading: party.portOfLoading, destinationPort: party.destinationPort,
             paymentTerm: party.paymentTerm, shipmentTerm: party.shipmentTerm, conditions: party.conditions,
             currency: party.currency, buyerOrderNo: orderNo, buyerOrderDate: orderDate, items, additionalDetails: extra,

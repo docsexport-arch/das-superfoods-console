@@ -97,12 +97,32 @@ export const partyFromRow = (r, products) => ({
   })),
 });
 
-/* Every name a party orders under, main one first — what the quotation and
-   proforma forms offer when the same party orders under a different name.   */
-export function buyerChoices(party) {
+/* Every name on a party as ONE list: the buyer, the other names it orders
+   under, and the consignee. Sometimes the consignee is the buyer, so the
+   quotation and proforma forms offer the whole list for either role
+   (decisions/008). The main buyer is always first. A name + address that
+   appears twice is listed once and carries both roles.                       */
+export function partyNames(party) {
   if (!party) return [];
-  const others = (party.altBuyers || []).filter((b) => String(b.name || "").trim() !== "");
-  return [{ name: party.buyerName || "", address: party.buyerAddress || "" }, ...others];
+  const clean = (v) => String(v || "").trim();
+  const listed = [
+    { name: party.buyerName, address: party.buyerAddress, role: "buyer" },
+    ...(party.altBuyers || []).map((b) => ({ name: b.name, address: b.address, role: "other name" })),
+    { name: party.consigneeName, address: party.consigneeAddress, role: "consignee" },
+  ];
+  const out = [];
+  listed.forEach((entry, i) => {
+    const name = clean(entry.name), address = clean(entry.address);
+    if (name === "" && i > 0) return;
+    const same = out.find((c) => c.name.toLowerCase() === name.toLowerCase() && c.address.toLowerCase() === address.toLowerCase());
+    if (!same) out.push({ name, address, roles: [entry.role] });
+    else if (!same.roles.includes(entry.role)) same.roles.push(entry.role);
+  });
+  return out.map((c) => ({
+    name: c.name, address: c.address,
+    role: c.roles.join(" & "), isConsignee: c.roles.includes("consignee"),
+    label: `${c.name} (${c.roles.join(" & ")})`,
+  }));
 }
 
 export const quotationFromRow = (r) => ({
