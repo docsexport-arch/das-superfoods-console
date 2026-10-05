@@ -20,7 +20,7 @@ export const QUOTATION_KEYS = [
   "paymentTerm", "igst", "igstRate", "items", "expectedUpdatedAt",
 ];
 export const PROFORMA_KEYS = [
-  "type", "partyId", "quotationRef", "buyerName", "buyerAddress", "consigneeName",
+  "docNo", "type", "partyId", "quotationRef", "buyerName", "buyerAddress", "consigneeName",
   "consigneeAddress", "consigneeOptions", "portOfLoading", "destinationPort",
   "shipmentTerm", "paymentTerm", "conditions", "currency", "buyerOrderNo",
   "buyerOrderDate", "additionalDetails", "taxRate", "items",

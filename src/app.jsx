@@ -12,6 +12,8 @@ import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, part
 import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, gramsFromKg, kgFromGrams } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
+import { exportRows } from "./lib/excel.js";
+import { proformaSheetRows, proformaLineAmount, proformaUnits, fileSafe, PROFORMA_SHEET_WIDTHS } from "./lib/documents.js";
 import {
   pick, PARTY_KEYS, PARTY_PRODUCT_KEYS, QUOTATION_KEYS, PROFORMA_KEYS, SHIPMENT_KEYS, COMPANY_KEYS, DRAFT_KEYS,
 } from "./lib/payloads.js";
@@ -1215,6 +1217,8 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
     ? partyNames(savedParty).findIndex((c) => c.name === who.name && c.address === who.address) : -1);
   const [partyId, setPartyId] = useState(savedParty ? savedParty.id : eligible.length ? eligible[0].id : "");
   const party = store.parties.find((p) => p.id === partyId);
+  // Typed by hand (db/013) — the database refuses a blank or repeated number.
+  const [docNo, setDocNo] = useState(saved.docNo || "");
   const [quotationRef, setQuotationRef] = useState(saved.quotationRef || "");
   const [orderNo, setOrderNo] = useState(saved.orderNo || "");
   const [orderDate, setOrderDate] = useState(saved.orderDate || todayIST());
@@ -1273,6 +1277,10 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
       </div>
 
       <div className="mb-5 grid gap-4 md:grid-cols-4">
+        <Field label="Proforma no." hint="Typed by hand — it must not repeat">
+          <input className={input} value={docNo} maxLength={40} placeholder="e.g. DS-PI-INTL-2026-0002"
+            onChange={(e) => setDocNo(e.target.value)} />
+        </Field>
         <Field label="Party">
           <select className={input} value={partyId} onChange={(e) => { setPartyId(e.target.value); setItems([]); setBuyerIdx(0); setConsigneeIdx(null); }}>
             {eligible.map((p) => <option key={p.id} value={p.id}>{p.buyerName}</option>)}
@@ -1375,16 +1383,16 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
           <button onClick={onCancel} className={btnGhost}>Cancel</button>
           {onSaveDraft && (
             <button className={btnGhost} onClick={() => onSaveDraft({
-              title: [buyer.name, orderNo ? "order " + orderNo : "", totalBoxes + " boxes"].filter(Boolean).join(" · "),
+              title: [docNo.trim(), buyer.name, orderNo ? "order " + orderNo : "", totalBoxes + " boxes"].filter(Boolean).join(" · "),
               payload: {
-                type, partyId, quotationRef, orderNo, orderDate, items, extra, taxRate,
+                docNo, type, partyId, quotationRef, orderNo, orderDate, items, extra, taxRate,
                 buyer: { name: buyer.name, address: buyer.address },
                 consignee: consigneeIdx === null || !choices[consigneeIdx] ? null : { name: consignee.name, address: consignee.address },
               },
             })}>Save draft</button>
           )}
           <button className={btn} onClick={() => onSave({
-            id: tempId(), type, date: todayIST(), partyId, quotationRef,
+            id: tempId(), docNo: docNo.trim(), type, date: todayIST(), partyId, quotationRef,
             buyerName: buyer.name, buyerAddress: buyer.address,
             consigneeName: consignee.name, consigneeAddress: consignee.address,
             // Every name on the party travels with the proforma, so the shipment
@@ -1396,6 +1404,122 @@ function ProformaForm({ type, draft, onSave, onSaveDraft, onCancel }) {
             totalBoxes, totalValue, taxableValue, taxRate, taxAmount,
             grandTotal: isIntl ? totalValue : grandTotal, linkedFinalInvoiceId: null,
           })}>Create proforma</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* The proforma as a printed page. The browser's "Save as PDF" makes the file;
+   the Excel download says the same thing from lib/documents.js.            */
+function ProformaDocument({ pi, company }) {
+  const isIntl = pi.type === "international";
+  const lines = pi.items || [];
+  const small = { margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" };
+  return (
+    <div className="doc">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <p style={{ fontSize: 18, fontWeight: "bold", margin: 0 }}>{company.name || "Das Superfoods"}</p>
+          <p className="muted" style={{ margin: "2px 0 0", maxWidth: 320 }}>{company.address}</p>
+          <p className="muted" style={{ margin: "2px 0 0" }}>
+            {company.gstNo ? `GST ${company.gstNo}` : ""}{company.gstNo && company.iecCode ? " · " : ""}
+            {company.iecCode ? `IEC ${company.iecCode}` : ""}
+          </p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <h1>Proforma invoice</h1>
+          <p style={{ margin: "6px 0 0" }}><b>{pi.docNo}</b></p>
+          <p className="muted" style={{ margin: 0 }}>Date: {fmtDate(pi.date)}</p>
+          {pi.buyerOrderNo && <p className="muted" style={{ margin: 0 }}>Buyer order: {pi.buyerOrderNo} of {fmtDate(pi.buyerOrderDate)}</p>}
+        </div>
+      </div>
+      <div className="rule" />
+
+      <div style={{ display: "flex", gap: 32 }}>
+        <div style={{ flex: 1 }}>
+          <p className="muted" style={small}>Buyer</p>
+          <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{pi.buyerName}</p>
+          <p className="muted" style={{ margin: 0 }}>{pi.buyerAddress}</p>
+        </div>
+        <div style={{ flex: 1 }}>
+          <p className="muted" style={small}>{isIntl ? "Consignee" : "Manufactured by / ship to"}</p>
+          <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{pi.consigneeName || "—"}</p>
+          <p className="muted" style={{ margin: 0 }}>{pi.consigneeAddress}</p>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 32, marginTop: 12 }}>
+        <div style={{ flex: 1 }}>
+          <p className="muted" style={small}>Ports</p>
+          <p style={{ margin: "3px 0 0" }}>Loading: {pi.portOfLoading || "—"}</p>
+          <p style={{ margin: 0 }}>Destination: {pi.destinationPort || "—"}</p>
+        </div>
+        <div style={{ flex: 1 }}>
+          <p className="muted" style={small}>Terms</p>
+          <p style={{ margin: "3px 0 0" }}>Shipment: {pi.shipmentTerm || "—"} · Currency: {pi.currency}</p>
+          <p style={{ margin: 0 }}>Payment: {pi.paymentTerm || "—"}</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: 28 }}>#</th>
+            <th>Product</th>
+            <th style={{ width: 80 }}>HSN</th>
+            <th className="num" style={{ width: 60 }}>Boxes</th>
+            <th className="num" style={{ width: 60 }}>Units</th>
+            <th className="num" style={{ width: 86 }}>{isIntl ? "Rate / box" : "MRP / box"}</th>
+            <th className="num" style={{ width: 100 }}>{isIntl ? "Amount" : "Taxable value"}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((it, i) => (
+            <tr key={it.id || i}>
+              <td>{i + 1}</td>
+              <td>{it.name}</td>
+              <td>{it.hsn}</td>
+              <td className="num">{it.boxQty}</td>
+              <td className="num">{unitsFromBoxes(it.boxQty, it.packsPerBox)}</td>
+              <td className="num">{fmtNum(isIntl ? it.rate : it.mrp)}</td>
+              <td className="num">{fmtNum(proformaLineAmount(pi, it))}</td>
+            </tr>
+          ))}
+          <tr>
+            <td colSpan={3} className="num"><b>Total</b></td>
+            <td className="num"><b>{pi.totalBoxes}</b></td>
+            <td className="num"><b>{proformaUnits(pi)}</b></td>
+            <td></td>
+            <td className="num"><b>{fmtNum(isIntl ? pi.totalValue : pi.taxableValue)}</b></td>
+          </tr>
+          {!isIntl && (
+            <tr>
+              <td colSpan={6} className="num">Tax @ {fmtNum(pi.taxRate, 2)}%</td>
+              <td className="num">{fmtNum(pi.taxAmount)}</td>
+            </tr>
+          )}
+          <tr>
+            <td colSpan={6} className="num"><b>Grand total ({pi.currency})</b></td>
+            <td className="num"><b>{fmtNum(pi.grandTotal)}</b></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p style={{ marginTop: 8, fontStyle: "italic" }}>Amount in words: {amountInWords(pi.grandTotal, pi.currency)}</p>
+      {pi.conditions && <p className="muted" style={{ marginTop: 10, fontSize: 11 }}>Conditions: {pi.conditions}</p>}
+      {pi.additionalDetails && <p className="muted" style={{ marginTop: 6, fontSize: 11 }}>{pi.additionalDetails}</p>}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 28 }}>
+        <div>
+          <p className="muted" style={small}>Bank details</p>
+          <p style={{ margin: "3px 0 0" }}>{company.bankName || "—"}</p>
+          <p style={{ margin: 0 }}>Account: {company.accountNo || "—"}</p>
+          <p style={{ margin: 0 }}>IFSC: {company.ifsc || "—"} · SWIFT: {company.swift || "—"}</p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <p style={{ margin: 0 }}>For <b>{company.name || "Das Superfoods"}</b></p>
+          <p className="muted" style={{ margin: "44px 0 0" }}>Authorised signatory</p>
         </div>
       </div>
     </div>
@@ -1414,6 +1538,14 @@ function ProformaPage() {
 
   // From a draft, the proforma and the draft's retirement are one transaction.
   const createProforma = async (pi) => {
+    // Said here so it is said at once; the database checks the same things and
+    // is the one that decides (db/013).
+    const typed = String(pi.docNo || "").trim();
+    if (!typed) { setSaveError("Enter the proforma number."); return; }
+    if (store.pis.some((p) => String(p.docNo || "").trim().toUpperCase() === typed.toUpperCase())) {
+      setSaveError(`Proforma number ${typed} is already in use. Type a different number.`);
+      return;
+    }
     const message = await attempt(async () => {
       if (form && form.draft) await call("raise_from_draft", { p_draft: form.draft.id, p: pick(pi, PROFORMA_KEYS) });
       else await call("create_proforma", { p: pick(pi, PROFORMA_KEYS) });
@@ -1443,6 +1575,29 @@ function ProformaPage() {
     });
     setSaveError(message);
     if (!message) setNotice("Draft discarded.");
+  };
+
+  // Download → PDF: the document is drawn into the print portal and the
+  // browser's "Save as PDF" makes the file, named after the proforma.
+  const [downloadId, setDownloadId] = useState(null);
+  const [printing, setPrinting] = useState(null);
+  useEffect(() => {
+    if (!printing) return undefined;
+    const title = document.title;
+    const t = setTimeout(() => {
+      document.title = `Proforma ${fileSafe(printing.docNo)}`;
+      window.print();
+      document.title = title;
+      setPrinting(null);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [printing]);
+
+  // Download → Excel: the same document as rows.
+  const downloadExcel = async (pi) => {
+    const message = await attempt(() => exportRows(
+      `Proforma-${fileSafe(pi.docNo)}`, "Proforma", proformaSheetRows(pi, store.company), PROFORMA_SHEET_WIDTHS));
+    setSaveError(message);
   };
 
   const unitsOf = (pi) => (pi.items || []).reduce((s, i) => s + unitsFromBoxes(i.boxQty, i.packsPerBox), 0);
@@ -1494,6 +1649,7 @@ function ProformaPage() {
               <th className={th}>Document</th><th className={th}>Date</th><th className={th}>Buyer</th><th className={th}>Type</th>
               <th className={th + " text-right"}>Boxes</th><th className={th + " text-right"}>Units</th>
               <th className={th + " text-right"}>Value</th><th className={th}>Status</th>
+              <th className={th + " text-right"}>Download</th>
             </tr>
           </thead>
           <tbody>
@@ -1507,16 +1663,36 @@ function ProformaPage() {
                 <td className={tdNum}>{unitsOf(pi)}</td>
                 <td className={tdNum}>{fmtMoney(pi.grandTotal, pi.currency)}</td>
                 <td className={td}>{pi.linkedFinalInvoiceId ? <Chip tone="ok">Invoiced</Chip> : <Chip tone="warn">Open</Chip>}</td>
+                <td className={td + " whitespace-nowrap text-right"}>
+                  {downloadId === pi.id ? (
+                    <span className="flex items-center justify-end gap-3">
+                      <button onClick={() => { setDownloadId(null); setPrinting(pi); }} className="text-xs text-[var(--accent)]">PDF</button>
+                      <button onClick={() => { setDownloadId(null); downloadExcel(pi); }} className="text-xs text-[var(--accent)]">Excel</button>
+                      <button onClick={() => setDownloadId(null)} aria-label="Close download options"><X className="h-3.5 w-3.5 text-[var(--muted)]" /></button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setDownloadId(pi.id)} aria-label={`Download ${pi.docNo}`}
+                      className="inline-flex items-center gap-1 text-xs text-[var(--accent)]">
+                      <Download className="h-3 w-3" /> Download
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             {list.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-[var(--muted)]">
                 {tab === "open" ? "No open proforma invoices — every one raised so far has been invoiced." : "No proforma invoices yet."}
               </td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {printing && (
+        <PrintDocument>
+          <ProformaDocument pi={printing} company={store.company} />
+        </PrintDocument>
+      )}
     </div>
   );
 }
@@ -2281,7 +2457,7 @@ export default App;
 
 // Exported for tests/render.test.jsx, which draws every screen against sample data.
 export {
-  AppCtx, SignIn, Overview, PartiesPage, PartyForm, QuotationsPage, QuotationForm, QuotationDocument,
+  AppCtx, SignIn, Overview, PartiesPage, PartyForm, QuotationsPage, QuotationForm, QuotationDocument, ProformaDocument,
   ProformaPage, ProformaForm, ShipmentsPage, ShipmentForm, AnalyticsPage, CompanyPage, UsersPage,
   ChangePasswordDialog, CommandPalette,
 };

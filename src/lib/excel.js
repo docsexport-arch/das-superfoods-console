@@ -19,6 +19,20 @@ export function buildSheetData(columns, rows) {
   ];
 }
 
+// Rows that are already laid out (a document, not a table): every text cell
+// is still defanged, numbers are left as numbers.
+export const defangRows = (rows) =>
+  rows.map((row) => row.map((cell) => (cell === null || cell === undefined ? "" : defang(cell))));
+
+export async function exportRows(fileName, sheetName, rows, widths = []) {
+  const XLSX = await import("xlsx");
+  const sheet = XLSX.utils.aoa_to_sheet(defangRows(rows));
+  sheet["!cols"] = widths.map((wch) => ({ wch }));
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, sheetName.slice(0, 31));
+  XLSX.writeFile(book, `${fileName}.xlsx`);
+}
+
 // SheetJS is loaded on demand: it is large, and only an export needs it.
 export async function exportExcel(name, columns, rows) {
   const XLSX = await import("xlsx");
