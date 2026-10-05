@@ -8,7 +8,7 @@ import {
   Download, TriangleAlert, Search, Sun, Moon,
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
-import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, withTimeout, humanise } from "./lib/db.js";
+import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, buyerChoices, withTimeout, humanise } from "./lib/db.js";
 import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
@@ -142,7 +142,7 @@ function CommandPalette({ open, onClose, onNavigate, sections }) {
 
   const results = [];
   sections.forEach((s) => { if (match(s.label)) results.push({ kind: "Section", label: s.label, go: s.key }); });
-  store.parties.forEach((p) => { if (match(p.buyerName) || match(p.country)) results.push({ kind: "Party", label: p.buyerName, meta: p.country, go: "parties" }); });
+  store.parties.forEach((p) => { if (match(p.buyerName) || match(p.country) || (p.altBuyers || []).some((b) => match(b.name))) results.push({ kind: "Party", label: p.buyerName, meta: p.country, go: "parties" }); });
   store.quotations.forEach((x) => { if (match(x.docNo) || match(x.buyerName)) results.push({ kind: "Quotation", label: x.docNo, meta: x.buyerName, go: "quotations" }); });
   store.pis.forEach((x) => { if (match(x.docNo) || match(x.buyerName)) results.push({ kind: "Proforma", label: x.docNo, meta: x.buyerName, go: "proforma" }); });
   store.finalInvoices.forEach((x) => { if (match(x.docNo) || match(x.buyerName)) results.push({ kind: "Shipment", label: x.docNo, meta: x.buyerName, go: "shipments" }); });
@@ -586,10 +586,12 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
     type: tab, buyerName: "", buyerAddress: "", consigneeName: "", consigneeAddress: "",
     country: tab === "domestic" ? "India" : "", currency: tab === "domestic" ? "INR" : "USD",
     shipmentTerm: "", paymentTerm: "", conditions: "", portOfLoading: "", destinationPort: "",
-    consigneeOptions: [],
+    consigneeOptions: [], altBuyers: [],
   });
   const [products, setProducts] = useState(initial ? initial.products : []);
   const set = (k, v) => setF({ ...f, [k]: v });
+  const altBuyers = f.altBuyers || [];
+  const setAlt = (i, k, v) => set("altBuyers", altBuyers.map((b, j) => (j === i ? { ...b, [k]: v } : b)));
 
   return (
     <div className={card + " mb-6 p-6"}>
@@ -622,6 +624,24 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
             <Field label="Destination port"><input className={input} value={f.destinationPort} onChange={(e) => set("destinationPort", e.target.value)} /></Field>
           </React.Fragment>
         )}
+      </div>
+      <div className="mb-5">
+        <p className="mb-1 text-sm font-medium">Other buyer names</p>
+        <p className="mb-3 text-xs text-[var(--muted)]">
+          For when this party places an order under a different name. Whoever raises the quotation or proforma picks which name and address go on it.
+        </p>
+        {altBuyers.map((b, i) => (
+          <div key={i} className="mb-2 grid items-end gap-3 md:grid-cols-[1fr_2fr_auto]">
+            <Field label={`Buyer name ${i + 2}`}><input className={input} value={b.name} onChange={(e) => setAlt(i, "name", e.target.value)} /></Field>
+            <Field label={`Buyer address ${i + 2}`}><input className={input} value={b.address} onChange={(e) => setAlt(i, "address", e.target.value)} /></Field>
+            <button type="button" className="mb-2.5" aria-label={`Remove buyer name ${i + 2}`} onClick={() => set("altBuyers", altBuyers.filter((_, j) => j !== i))}>
+              <Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" />
+            </button>
+          </div>
+        ))}
+        <button type="button" className={btnGhost + " flex items-center gap-1.5"} onClick={() => set("altBuyers", [...altBuyers, { name: "", address: "" }])}>
+          <Plus className="h-4 w-4" /> Add another buyer name
+        </button>
       </div>
       <p className="mb-2 text-sm font-medium">Products</p>
       <ProductRows products={products} setProducts={setProducts} mode={tab} />
@@ -679,6 +699,7 @@ function PartiesPage() {
   const priceList = store.parties.flatMap((p) => (p.products.length ? p.products : [null]).map((prod) => ({ p, prod })));
   const excelColumns = [
     { label: "Buyer", value: (r) => r.p.buyerName, width: 32 },
+    { label: "Other buyer names", value: (r) => (r.p.altBuyers || []).map((b) => (b.address ? `${b.name} — ${b.address}` : b.name)).join("; "), width: 40 },
     { label: "Type", value: (r) => r.p.type },
     { label: "Country", value: (r) => r.p.country },
     { label: "Currency", value: (r) => r.p.currency, width: 10 },
@@ -735,7 +756,12 @@ function PartiesPage() {
           <tbody>
             {filtered.map((p) => (
               <tr key={p.id} className="border-t border-[var(--line)]">
-                <td className={td + " font-medium"}>{p.buyerName}</td>
+                <td className={td + " font-medium"}>
+                  {p.buyerName}
+                  {(p.altBuyers || []).length > 0 && (
+                    <span className="block text-xs font-normal text-[var(--muted)]">Also orders as: {p.altBuyers.map((b) => b.name).join(" · ")}</span>
+                  )}
+                </td>
                 <td className={td + " text-[var(--muted)]"}>{p.country}</td>
                 <td className={td}>{p.currency}</td>
                 <td className={td + " font-num tabular-nums"}>{p.products.length}</td>
@@ -890,6 +916,9 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
   const isDomestic = totals.domestic;
   const total = totals.total, igstAmt = totals.tax, grand = totals.grand;
   const updateItem = (id, k, v) => setItems(items.map((i) => (i.id === id ? { ...i, [k]: v } : i)));
+  // Every name the chosen party orders under; the picker only shows when there is more than one.
+  const choices = buyerChoices(store.parties.find((x) => x.id === partyId));
+  const chosen = choices.findIndex((c) => c.name === buyerName);
 
   const submit = async () => {
     if (!buyerName.trim()) return setError("Buyer name is required.");
@@ -917,6 +946,17 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
             {store.parties.map((p) => <option key={p.id} value={p.id}>{p.buyerName}</option>)}
           </select>
         </Field>
+        {choices.length > 1 && (
+          <Field label="Name on this quotation" hint="This party orders under more than one name">
+            <select className={input} value={chosen} onChange={(e) => {
+              const c = choices[Number(e.target.value)];
+              if (c) { setBuyerName(c.name); setBuyerAddress(c.address); setError(""); }
+            }}>
+              {chosen < 0 && <option value={-1}>Typed by hand</option>}
+              {choices.map((c, i) => <option key={i} value={i}>{c.name}</option>)}
+            </select>
+          </Field>
+        )}
         <Field label="Buyer name"><input className={input} value={buyerName} onChange={(e) => { setBuyerName(e.target.value); setError(""); }} /></Field>
         <Field label="Country"><input className={input} value={country} onChange={(e) => setCountry(e.target.value)} /></Field>
         <Field label="Shipment term">
@@ -1126,7 +1166,11 @@ function ProformaForm({ type, onSave, onCancel }) {
   const [items, setItems] = useState([]);
   const [extra, setExtra] = useState("");
   const [taxRate, setTaxRate] = useState(5);
+  // Which of the party's names this proforma is raised in — 0 is the main one.
+  const [buyerIdx, setBuyerIdx] = useState(0);
   const isIntl = type === "international";
+  const choices = buyerChoices(party);
+  const buyer = choices[buyerIdx] || choices[0] || { name: "", address: "" };
 
   if (!party) {
     return (
@@ -1161,11 +1205,18 @@ function ProformaForm({ type, onSave, onCancel }) {
       </div>
 
       <div className="mb-5 grid gap-4 md:grid-cols-4">
-        <Field label="Buyer">
-          <select className={input} value={partyId} onChange={(e) => { setPartyId(e.target.value); setItems([]); }}>
+        <Field label="Party">
+          <select className={input} value={partyId} onChange={(e) => { setPartyId(e.target.value); setItems([]); setBuyerIdx(0); }}>
             {eligible.map((p) => <option key={p.id} value={p.id}>{p.buyerName}</option>)}
           </select>
         </Field>
+        {choices.length > 1 && (
+          <Field label="Name on this proforma" hint="This party orders under more than one name">
+            <select className={input} value={buyerIdx} onChange={(e) => setBuyerIdx(Number(e.target.value))}>
+              {choices.map((c, i) => <option key={i} value={i}>{c.name}</option>)}
+            </select>
+          </Field>
+        )}
         <Field label="Order no."><input className={input} value={orderNo} onChange={(e) => setOrderNo(e.target.value)} /></Field>
         <Field label="Order date"><input type="date" className={input} value={orderDate} onChange={(e) => setOrderDate(e.target.value)} /></Field>
         <Field label="Linked quotation">
@@ -1177,7 +1228,11 @@ function ProformaForm({ type, onSave, onCancel }) {
         {!isIntl && <Field label="Tax rate (%)"><input type="number" className={input} value={taxRate} onChange={(e) => setTaxRate(e.target.value)} /></Field>}
       </div>
 
-      <div className={panel + " mb-5 grid gap-4 p-4 text-xs md:grid-cols-3"}>
+      <div className={panel + " mb-5 grid gap-4 p-4 text-xs md:grid-cols-4"}>
+        <div>
+          <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Buyer on this proforma</p>
+          <p>{buyer.name}</p><p className="text-[var(--muted)]">{buyer.address}</p>
+        </div>
         <div>
           <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">{isIntl ? "Consignee" : "Manufactured by / ship to"}</p>
           <p>{party.consigneeName}</p><p className="text-[var(--muted)]">{party.consigneeAddress}</p>
@@ -1244,7 +1299,7 @@ function ProformaForm({ type, onSave, onCancel }) {
           <button onClick={onCancel} className={btnGhost}>Cancel</button>
           <button className={btn} onClick={() => onSave({
             id: tempId(), type, date: todayIST(), partyId, quotationRef,
-            buyerName: party.buyerName, buyerAddress: party.buyerAddress,
+            buyerName: buyer.name, buyerAddress: buyer.address,
             consigneeName: party.consigneeName, consigneeAddress: party.consigneeAddress,
             consigneeOptions: party.consigneeOptions || [party.consigneeName],
             portOfLoading: party.portOfLoading, destinationPort: party.destinationPort,

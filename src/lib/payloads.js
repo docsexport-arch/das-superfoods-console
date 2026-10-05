@@ -7,9 +7,11 @@
 // the list in the same commit.
 export const PARTY_KEYS = [
   "id", "type", "buyerName", "buyerAddress", "consigneeName", "consigneeAddress",
-  "consigneeOptions", "country", "currency", "shipmentTerm", "paymentTerm",
+  "consigneeOptions", "altBuyers", "country", "currency", "shipmentTerm", "paymentTerm",
   "conditions", "portOfLoading", "destinationPort", "products",
 ];
+// One entry of altBuyers — another name the same party orders under.
+export const ALT_BUYER_KEYS = ["name", "address"];
 export const PARTY_PRODUCT_KEYS = [
   "id", "name", "hsn", "rate", "mrp", "netWt", "grossWt", "packsPerBox", "weightPerPackG",
 ];
@@ -35,7 +37,7 @@ export const USER_ACCESS_KEYS = ["role", "fullName", "active", "sections"];
 
 // Which function each list is sent to — used by the contract test.
 export const RPC_CONTRACT = {
-  save_party: [...PARTY_KEYS, ...PARTY_PRODUCT_KEYS],
+  save_party: [...PARTY_KEYS, ...PARTY_PRODUCT_KEYS, ...ALT_BUYER_KEYS],
   save_quotation: QUOTATION_KEYS,
   create_proforma: PROFORMA_KEYS,
   create_shipment: SHIPMENT_KEYS,

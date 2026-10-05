@@ -84,6 +84,8 @@ export const partyFromRow = (r, products) => ({
   buyerName: r.buyer_name, buyerAddress: r.buyer_address,
   consigneeName: r.consignee_name, consigneeAddress: r.consignee_address,
   consigneeOptions: r.consignee_options || [],
+  altBuyers: (Array.isArray(r.alt_buyers) ? r.alt_buyers : [])
+    .map((b) => ({ name: (b && b.name) || "", address: (b && b.address) || "" })),
   country: r.country, currency: r.currency,
   shipmentTerm: r.shipment_term, paymentTerm: r.payment_term, conditions: r.conditions,
   portOfLoading: r.port_of_loading, destinationPort: r.destination_port,
@@ -94,6 +96,14 @@ export const partyFromRow = (r, products) => ({
     packsPerBox: num(p.packs_per_box), weightPerPackG: num(p.weight_per_pack_g),
   })),
 });
+
+/* Every name a party orders under, main one first — what the quotation and
+   proforma forms offer when the same party orders under a different name.   */
+export function buyerChoices(party) {
+  if (!party) return [];
+  const others = (party.altBuyers || []).filter((b) => String(b.name || "").trim() !== "");
+  return [{ name: party.buyerName || "", address: party.buyerAddress || "" }, ...others];
+}
 
 export const quotationFromRow = (r) => ({
   id: r.id, docNo: r.doc_no, date: r.doc_date, partyId: r.party_id,
