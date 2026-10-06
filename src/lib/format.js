@@ -127,6 +127,15 @@ export function amountInWords(value, currency) {
 export const gramsFromKg = (kg) => Math.round(toNumber(kg) * 1e6) / 1e3;
 export const kgFromGrams = (g) => Math.round(toNumber(g) * 1e3) / 1e6;
 
+// A party can carry several conditions. They are kept as ONE text, a
+// condition per line — the column and every function that copies it are
+// unchanged, and a proforma raised earlier with a single condition reads the
+// same as before. These two turn the text into a list and back.
+export const conditionsFromText = (text) =>
+  String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+export const conditionsToText = (list) =>
+  (list || []).map((line) => String(line || "").replace(/\s*\r?\n\s*/g, " ").trim()).filter(Boolean).join("\n");
+
 // A short random id for rows that only exist on screen. The database never
 // sees these as identities — a non-uuid id is how it recognises a new row.
 export const tempId = () => Math.random().toString(36).slice(2, 10);

@@ -1,7 +1,7 @@
 // What a document says, as plain rows — shared by the printed page and the
 // Excel download so the two can never disagree. No arithmetic beyond a line's
 // own amount: the totals are the ones the database computed and stored.
-import { fmtDate, toNumber, unitsFromBoxes, amountInWords } from "./format.js";
+import { fmtDate, toNumber, unitsFromBoxes, amountInWords, conditionsFromText } from "./format.js";
 
 // An international proforma is priced by rate; a private-label one by MRP.
 export const proformaLineAmount = (pi, line) =>
@@ -47,7 +47,9 @@ export function proformaSheetRows(pi, company = {}) {
     rows.push(["", "", "", "", "", "Grand total", toNumber(pi.grandTotal)]);
   }
   rows.push([], ["Amount in words", amountInWords(pi.grandTotal, pi.currency)]);
-  if (pi.conditions) rows.push(["Conditions", pi.conditions]);
+  // One row per condition; numbered only when there is more than one.
+  const conditions = conditionsFromText(pi.conditions);
+  conditions.forEach((line, i) => rows.push([i === 0 ? "Conditions" : "", conditions.length > 1 ? `${i + 1}. ${line}` : line]));
   if (pi.additionalDetails) rows.push(["Additional details", pi.additionalDetails]);
   rows.push(
     [],

@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
 import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, partyNames, withTimeout, humanise } from "./lib/db.js";
-import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, gramsFromKg, kgFromGrams } from "./lib/format.js";
+import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, gramsFromKg, kgFromGrams, conditionsFromText, conditionsToText } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
 import { exportRows } from "./lib/excel.js";
@@ -593,6 +593,12 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
   });
   const [products, setProducts] = useState(() => (initial ? initial.products : [])
     .map((p) => ({ ...p, netWtG: gramsFromKg(p.netWt), grossWtG: gramsFromKg(p.grossWt) })));
+  // Conditions are edited as a list and saved as one text, a condition per
+  // line. There is always at least one box to type into.
+  const [conditions, setConditions] = useState(() => {
+    const list = conditionsFromText(initial ? initial.conditions : "");
+    return list.length ? list : [""];
+  });
   const set = (k, v) => setF({ ...f, [k]: v });
   const altBuyers = f.altBuyers || [];
   const setAlt = (i, k, v) => set("altBuyers", altBuyers.map((b, j) => (j === i ? { ...b, [k]: v } : b)));
@@ -621,13 +627,33 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
         </Field>
         <Field label="Shipment term"><input className={input} placeholder="FOB / CIF / CNF" value={f.shipmentTerm} onChange={(e) => set("shipmentTerm", e.target.value)} /></Field>
         <Field label="Payment term" className="md:col-span-2"><input className={input} value={f.paymentTerm} onChange={(e) => set("paymentTerm", e.target.value)} /></Field>
-        <Field label="Conditions"><input className={input} value={f.conditions} onChange={(e) => set("conditions", e.target.value)} /></Field>
         {tab === "international" && (
           <React.Fragment>
             <Field label="Port of loading"><input className={input} value={f.portOfLoading} onChange={(e) => set("portOfLoading", e.target.value)} /></Field>
             <Field label="Destination port"><input className={input} value={f.destinationPort} onChange={(e) => set("destinationPort", e.target.value)} /></Field>
           </React.Fragment>
         )}
+      </div>
+      <div className="mb-5">
+        <p className="mb-1 text-sm font-medium">Conditions</p>
+        <p className="mb-3 text-xs text-[var(--muted)]">
+          Printed on every proforma raised for this party, each on its own line.
+        </p>
+        {conditions.map((c, i) => (
+          <div key={i} className="mb-2 grid items-end gap-3 md:grid-cols-[1fr_auto]">
+            <Field label={`Condition ${i + 1}`}>
+              <input className={input} value={c} onChange={(e) => setConditions(conditions.map((x, j) => (j === i ? e.target.value : x)))} />
+            </Field>
+            {conditions.length > 1 && (
+              <button type="button" className="mb-2.5" aria-label={`Remove condition ${i + 1}`} onClick={() => setConditions(conditions.filter((_, j) => j !== i))}>
+                <Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" />
+              </button>
+            )}
+          </div>
+        ))}
+        <button type="button" className={btnGhost + " flex items-center gap-1.5"} onClick={() => setConditions([...conditions, ""])}>
+          <Plus className="h-4 w-4" /> Add another condition
+        </button>
       </div>
       <div className="mb-5">
         <p className="mb-1 text-sm font-medium">Other buyer and consignee names</p>
@@ -656,7 +682,8 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
             const consigneeOptions = Array.from(new Set([...(f.consigneeOptions || []), f.consigneeName].filter(Boolean)));
             // Typed in grams per box, stored in kilograms per box.
             const lines = products.map(({ netWtG, grossWtG, ...p }) => ({ ...p, netWt: kgFromGrams(netWtG), grossWt: kgFromGrams(grossWtG) }));
-            onSave(isEdit ? { ...f, products: lines, consigneeOptions } : { id: tempId(), ...f, products: lines, consigneeOptions });
+            const party = { ...f, conditions: conditionsToText(conditions), products: lines, consigneeOptions };
+            onSave(isEdit ? party : { id: tempId(), ...party });
           }}
           className={btn}
         >
@@ -1371,6 +1398,12 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
           <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Terms</p>
           <p>{party.shipmentTerm || "—"} · {party.currency}</p><p className="text-[var(--muted)]">{party.paymentTerm}</p>
         </div>
+        {conditionsFromText(party.conditions).length > 0 && (
+          <div className="md:col-span-4">
+            <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Conditions</p>
+            {conditionsFromText(party.conditions).map((c, i) => <p key={i} className="text-[var(--muted)]">{i + 1}. {c}</p>)}
+          </div>
+        )}
       </div>
 
       <div className={panel + " mb-4 overflow-hidden"}>
@@ -1550,7 +1583,15 @@ function ProformaDocument({ pi, company }) {
       </table>
 
       <p style={{ marginTop: 8, fontStyle: "italic" }}>Amount in words: {amountInWords(pi.grandTotal, pi.currency)}</p>
-      {pi.conditions && <p className="muted" style={{ marginTop: 10, fontSize: 11 }}>Conditions: {pi.conditions}</p>}
+      {conditionsFromText(pi.conditions).length === 1 && (
+        <p className="muted" style={{ marginTop: 10, fontSize: 11 }}>Conditions: {conditionsFromText(pi.conditions)[0]}</p>
+      )}
+      {conditionsFromText(pi.conditions).length > 1 && (
+        <div className="muted" style={{ marginTop: 10, fontSize: 11 }}>
+          <p style={{ margin: 0 }}>Conditions</p>
+          {conditionsFromText(pi.conditions).map((c, i) => <p key={i} style={{ margin: 0 }}>{i + 1}. {c}</p>)}
+        </div>
+      )}
       {pi.additionalDetails && <p className="muted" style={{ marginTop: 6, fontSize: 11 }}>{pi.additionalDetails}</p>}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 28 }}>
