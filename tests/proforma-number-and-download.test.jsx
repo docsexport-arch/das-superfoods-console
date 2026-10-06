@@ -89,8 +89,8 @@ describe("the proforma as rows — what the Excel download contains", () => {
   it("carries the letterhead, the number as typed, both parties and the terms", () => {
     expect(rows[0]).toEqual(["Das Superfoods Pvt. Ltd."]);
     expect(rows[2][0]).toBe("GST 24AAAAA0000A1Z5   IEC 0312345678");
-    expect(find("Proforma no.")).toEqual(["Proforma no.", "PI/25-26/014", "", "Date", "05/10/2026"]);
-    expect(find("Buyer order no.")).toEqual(["Buyer order no.", "PO-77", "", "Order date", "01/10/2026"]);
+    expect(find("PI No")).toEqual(["PI No", "PI/25-26/014", "", "PI Date", "05/10/2026"]);
+    expect(find("Buyer Order No")).toEqual(["Buyer Order No", "PO-77", "", "Buyer Order Date", "01/10/2026"]);
     expect(find("Buyer")).toEqual(["Buyer", "Crosschannel Imports Inc.", "", "Consignee", "Crosschannel Logistics"]);
     expect(find("Port of loading")).toEqual(["Port of loading", "Mundra", "", "Destination port", "New York"]);
     expect(find("Shipment term")).toEqual(["Shipment term", "FOB", "", "Payment term", "30% advance"]);
@@ -169,7 +169,7 @@ describe("the proforma on screen and on paper", () => {
   it("the printed page says the same as the sheet: number, parties, lines, totals, words, bank", () => {
     const html = draw(<ProformaDocument pi={intl} company={company} />);
     for (const s of [
-      "Proforma invoice", "PI/25-26/014", "Date: 05/10/2026", "Buyer order: PO-77 of 01/10/2026",
+      "Proforma invoice", "<b>PI No: PI/25-26/014</b>", "PI Date: 05/10/2026", "Buyer Order No: PO-77", "Buyer Order Date: 01/10/2026",
       "Das Superfoods Pvt. Ltd.", "GST 24AAAAA0000A1Z5", "Crosschannel Imports Inc.", "Crosschannel Logistics",
       "Loading: Mundra", "Destination: New York", "Shipment: FOB", "Payment: 30% advance",
       "Peanut Butter Crunchy 340g", "12000", "35,540.00", "19200", "56,864.00",

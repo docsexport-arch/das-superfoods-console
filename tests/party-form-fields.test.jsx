@@ -67,10 +67,12 @@ describe("the party form", () => {
     expect(appSource).not.toMatch(/set\("portOfLoading"|set\("destinationPort"/);
   });
 
-  it("an international party is offered USD only", () => {
+  it("an international party starts on USD and can still be set to INR", () => {
+    // decisions/015 corrects 014: "remove Currency: INR" was about the line on
+    // the proforma, not this choice. Both currencies stay on the party form.
     const currency = field(partyForm("international"), "Currency");
     expect(currency).toMatch(/<option[^>]*value="USD"[^>]*selected=""/);
-    expect(currency).not.toContain("INR");
+    expect(currency).toContain('value="INR"');
   });
 
   it("a private-label / India party still has INR, and starts on it", () => {

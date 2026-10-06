@@ -622,11 +622,7 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
         <Field label="Country"><input className={input} value={f.country} onChange={(e) => set("country", e.target.value)} /></Field>
         <Field label="Currency">
           <select className={input} value={f.currency} onChange={(e) => set("currency", e.target.value)}>
-            {/* An international party is priced in USD. INR is offered only where it
-                applies: a private-label / India party, or a party already saved in INR
-                (so opening it never changes its currency unasked). */}
-            <option value="USD">USD</option>
-            {(tab !== "international" || f.currency === "INR") && <option value="INR">INR</option>}
+            <option value="USD">USD</option><option value="INR">INR</option>
           </select>
         </Field>
         <Field label="Shipment term"><input className={input} placeholder="FOB / CIF / CNF" value={f.shipmentTerm} onChange={(e) => set("shipmentTerm", e.target.value)} /></Field>
@@ -1515,9 +1511,14 @@ function ProformaDocument({ pi, company }) {
         </div>
         <div style={{ textAlign: "right" }}>
           <h1>Proforma invoice</h1>
-          <p style={{ margin: "6px 0 0" }}><b>{pi.docNo}</b></p>
-          <p className="muted" style={{ margin: 0 }}>Date: {fmtDate(pi.date)}</p>
-          {pi.buyerOrderNo && <p className="muted" style={{ margin: 0 }}>Buyer order: {pi.buyerOrderNo} of {fmtDate(pi.buyerOrderDate)}</p>}
+          <p style={{ margin: "6px 0 0" }}><b>PI No: {pi.docNo}</b></p>
+          <p className="muted" style={{ margin: 0 }}>PI Date: {fmtDate(pi.date)}</p>
+          {pi.buyerOrderNo && (
+            <React.Fragment>
+              <p className="muted" style={{ margin: 0 }}>Buyer Order No: {pi.buyerOrderNo}</p>
+              <p className="muted" style={{ margin: 0 }}>Buyer Order Date: {fmtDate(pi.buyerOrderDate)}</p>
+            </React.Fragment>
+          )}
         </div>
       </div>
       <div className="rule" />
@@ -1545,7 +1546,7 @@ function ProformaDocument({ pi, company }) {
         )}
         <div style={{ flex: 1 }}>
           <p className="muted" style={small}>Terms</p>
-          <p style={{ margin: "3px 0 0" }}>Shipment: {pi.shipmentTerm || "—"} · Currency: {pi.currency}</p>
+          <p style={{ margin: "3px 0 0" }}>Shipment: {pi.shipmentTerm || "—"}{pi.currency === "INR" ? "" : ` · Currency: ${pi.currency}`}</p>
           <p style={{ margin: 0 }}>Payment: {pi.paymentTerm || "—"}</p>
         </div>
       </div>

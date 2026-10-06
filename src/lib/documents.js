@@ -26,8 +26,8 @@ export function proformaSheetRows(pi, company = {}) {
     [[company.gstNo ? `GST ${company.gstNo}` : "", company.iecCode ? `IEC ${company.iecCode}` : ""].filter(Boolean).join("   ")],
     [],
     ["PROFORMA INVOICE"],
-    ["Proforma no.", pi.docNo, "", "Date", fmtDate(pi.date)],
-    ["Buyer order no.", pi.buyerOrderNo || "", "", "Order date", fmtDate(pi.buyerOrderDate)],
+    ["PI No", pi.docNo, "", "PI Date", fmtDate(pi.date)],
+    ["Buyer Order No", pi.buyerOrderNo || "", "", "Buyer Order Date", fmtDate(pi.buyerOrderDate)],
     [],
     ["Buyer", pi.buyerName, "", intl ? "Consignee" : "Ship to", pi.consigneeName || ""],
     ["Buyer address", pi.buyerAddress || "", "", "Address", pi.consigneeAddress || ""],
@@ -35,7 +35,9 @@ export function proformaSheetRows(pi, company = {}) {
     ...(pi.portOfLoading || pi.destinationPort
       ? [["Port of loading", pi.portOfLoading || "", "", "Destination port", pi.destinationPort || ""]] : []),
     ["Shipment term", pi.shipmentTerm || "", "", "Payment term", pi.paymentTerm || ""],
-    ["Currency", pi.currency],
+    // A rupee proforma does not announce its currency (decisions/015); the
+    // grand total and the amount in words already say it.
+    ...(pi.currency === "INR" ? [] : [["Currency", pi.currency]]),
     [],
     ["#", "Product", "HSN", "Boxes", "Units", intl ? "Rate / box" : "MRP / box", intl ? "Amount" : "Taxable value"],
     ...lines.map((line, i) => [
