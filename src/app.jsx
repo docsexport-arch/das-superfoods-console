@@ -1294,7 +1294,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
   const ownConsignee = choices.findIndex((c) => c.isConsignee);
   const consigneeAt = consigneeIdx === null ? ownConsignee : consigneeIdx;
   const consignee = choices[consigneeAt] || nobody;
-  const consigneeLabel = isIntl ? "Consignee" : "Manufactured by / ship to";
+  const consigneeLabel = isIntl ? "Consignee" : "Ship to";
 
   // Ports, terms and currency are read from the party when the form is saved.
   // Without the party the proforma was raised for there is nothing safe to read.
@@ -1529,7 +1529,7 @@ function ProformaDocument({ pi, company }) {
           <p className="muted" style={{ margin: 0 }}>{pi.buyerAddress}</p>
         </div>
         <div style={{ flex: 1 }}>
-          <p className="muted" style={small}>{isIntl ? "Consignee" : "Manufactured by / ship to"}</p>
+          <p className="muted" style={small}>{isIntl ? "Consignee" : "Ship to"}</p>
           <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{pi.consigneeName || "—"}</p>
           <p className="muted" style={{ margin: 0 }}>{pi.consigneeAddress}</p>
         </div>

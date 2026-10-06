@@ -168,6 +168,22 @@ describe("the proforma document", () => {
     expect(proformaSheetRows(pi(), {}).some((r) => r[0] === "Port of loading")).toBe(false);
   });
 
+  it("a private-label proforma says Ship to — never 'Manufactured by'", () => {
+    // Removed on the owner's instruction: the party shown there is where the
+    // goods go, not who made them.
+    const domesticPi = pi({ type: "domestic", currency: "INR", taxRate: 5, taxAmount: 0, taxableValue: 0 });
+    const html = draw(<ProformaDocument pi={domesticPi} company={{}} />);
+    expect(html).toMatch(/<p[^>]*>Ship to<\/p>/);
+    expect(html).not.toMatch(/manufactur/i);
+    expect(proformaSheetRows(domesticPi, {}).find((r) => r[0] === "Buyer")[3]).toBe("Ship to");
+    expect(JSON.stringify(proformaSheetRows(domesticPi, {}))).not.toMatch(/manufactur/i);
+    // Nor on the form that raises it, nor anywhere else in the client.
+    expect(proformaForm("domestic", [domestic])).not.toMatch(/manufactur/i);
+    expect(appSource).not.toMatch(/manufactur/i);
+    // An international proforma is unchanged: it still says Consignee.
+    expect(draw(<ProformaDocument pi={pi()} company={{}} />)).toMatch(/<p[^>]*>Consignee<\/p>/);
+  });
+
   it("with only one of the two, shows it and marks the other as missing", () => {
     const html = draw(<ProformaDocument pi={pi({ portOfLoading: "Mundra" })} company={{}} />);
     expect(html).toContain("Loading: Mundra");

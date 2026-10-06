@@ -29,7 +29,7 @@ export function proformaSheetRows(pi, company = {}) {
     ["Proforma no.", pi.docNo, "", "Date", fmtDate(pi.date)],
     ["Buyer order no.", pi.buyerOrderNo || "", "", "Order date", fmtDate(pi.buyerOrderDate)],
     [],
-    ["Buyer", pi.buyerName, "", intl ? "Consignee" : "Manufactured by / ship to", pi.consigneeName || ""],
+    ["Buyer", pi.buyerName, "", intl ? "Consignee" : "Ship to", pi.consigneeName || ""],
     ["Buyer address", pi.buyerAddress || "", "", "Address", pi.consigneeAddress || ""],
     // Ports are typed on the proforma; a proforma with neither says nothing about them.
     ...(pi.portOfLoading || pi.destinationPort

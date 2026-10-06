@@ -126,7 +126,7 @@ describe("the proforma as rows — what the Excel download contains", () => {
     expect(d[head + 1]).toEqual([1, "Private Label PB 1kg", "20081100", 100, 600, 1500, 150000]);
     expect(d).toContainEqual(["", "", "", "", "", "Tax @ 5%", 7500]);
     expect(d).toContainEqual(["", "", "", "", "", "Grand total", 157500]);
-    expect(d.find((r) => r[0] === "Buyer")[3]).toBe("Manufactured by / ship to");
+    expect(d.find((r) => r[0] === "Buyer")[3]).toBe("Ship to");
     expect(d.find((r) => r[0] === "Additional details")).toEqual(["Additional details", "Buyer's label supplied"]);
     expect(d.find((r) => r[0] === "Amount in words")[1]).toMatch(/^Rupees one lakh fifty seven thousand five hundred/);
   });
@@ -184,7 +184,7 @@ describe("the proforma on screen and on paper", () => {
 
   it("a private-label proforma prints MRP, tax and the rupee grand total", () => {
     const html = draw(<ProformaDocument pi={domestic} company={company} />);
-    for (const s of ["PL-0009", "MRP / box", "Taxable value", "Tax @ 5.00%", "7,500.00", "Grand total (INR)", "1,57,500.00", "Manufactured by / ship to"]) {
+    for (const s of ["PL-0009", "MRP / box", "Taxable value", "Tax @ 5.00%", "7,500.00", "Grand total (INR)", "1,57,500.00", "Ship to"]) {
       expect(html, s).toContain(s);
     }
   });
