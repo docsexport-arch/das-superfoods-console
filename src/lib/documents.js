@@ -31,7 +31,9 @@ export function proformaSheetRows(pi, company = {}) {
     [],
     ["Buyer", pi.buyerName, "", intl ? "Consignee" : "Manufactured by / ship to", pi.consigneeName || ""],
     ["Buyer address", pi.buyerAddress || "", "", "Address", pi.consigneeAddress || ""],
-    ["Port of loading", pi.portOfLoading || "", "", "Destination port", pi.destinationPort || ""],
+    // Ports are typed on the proforma; a proforma with neither says nothing about them.
+    ...(pi.portOfLoading || pi.destinationPort
+      ? [["Port of loading", pi.portOfLoading || "", "", "Destination port", pi.destinationPort || ""]] : []),
     ["Shipment term", pi.shipmentTerm || "", "", "Payment term", pi.paymentTerm || ""],
     ["Currency", pi.currency],
     [],

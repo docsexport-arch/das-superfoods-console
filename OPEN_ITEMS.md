@@ -32,6 +32,10 @@ a green build.
       snapshot in `create_shipment` — in ONE migration, since the function names
       the column. IFSC is already gone from every screen and document
       (decisions/011); the column is kept only because the live client reads it.
+- [ ] Then decide what to do with `parties.port_of_loading` / `destination_port`:
+ports are typed on the proforma now (decisions/014) and the party form no
+longer shows them. Drop the columns once no proforma should be pre-filled
+from an old party, and take the two keys out of `save_party` with them.
 
 **Next increment — usability the Bible requires**
 - [ ] Tables: sortable headers and reorderable columns from one column registry.

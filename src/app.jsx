@@ -617,22 +617,20 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
       <div className="mb-5 grid gap-4 md:grid-cols-3">
         <Field label="Buyer name"><input className={input} value={f.buyerName} onChange={(e) => set("buyerName", e.target.value)} /></Field>
         <Field label="Buyer address" className="md:col-span-2"><input className={input} value={f.buyerAddress} onChange={(e) => set("buyerAddress", e.target.value)} /></Field>
-        <Field label="Consignee name"><input className={input} value={f.consigneeName} onChange={(e) => set("consigneeName", e.target.value)} /></Field>
-        <Field label="Consignee address" className="md:col-span-2"><input className={input} value={f.consigneeAddress} onChange={(e) => set("consigneeAddress", e.target.value)} /></Field>
+        <Field label="Ship to"><input className={input} value={f.consigneeName} onChange={(e) => set("consigneeName", e.target.value)} /></Field>
+        <Field label="Shipping address" className="md:col-span-2"><input className={input} value={f.consigneeAddress} onChange={(e) => set("consigneeAddress", e.target.value)} /></Field>
         <Field label="Country"><input className={input} value={f.country} onChange={(e) => set("country", e.target.value)} /></Field>
         <Field label="Currency">
           <select className={input} value={f.currency} onChange={(e) => set("currency", e.target.value)}>
-            <option value="USD">USD</option><option value="INR">INR</option>
+            {/* An international party is priced in USD. INR is offered only where it
+                applies: a private-label / India party, or a party already saved in INR
+                (so opening it never changes its currency unasked). */}
+            <option value="USD">USD</option>
+            {(tab !== "international" || f.currency === "INR") && <option value="INR">INR</option>}
           </select>
         </Field>
         <Field label="Shipment term"><input className={input} placeholder="FOB / CIF / CNF" value={f.shipmentTerm} onChange={(e) => set("shipmentTerm", e.target.value)} /></Field>
         <Field label="Payment term" className="md:col-span-2"><input className={input} value={f.paymentTerm} onChange={(e) => set("paymentTerm", e.target.value)} /></Field>
-        {tab === "international" && (
-          <React.Fragment>
-            <Field label="Port of loading"><input className={input} value={f.portOfLoading} onChange={(e) => set("portOfLoading", e.target.value)} /></Field>
-            <Field label="Destination port"><input className={input} value={f.destinationPort} onChange={(e) => set("destinationPort", e.target.value)} /></Field>
-          </React.Fragment>
-        )}
       </div>
       <div className="mb-5">
         <p className="mb-1 text-sm font-medium">Conditions</p>
@@ -656,9 +654,9 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
         </button>
       </div>
       <div className="mb-5">
-        <p className="mb-1 text-sm font-medium">Other buyer and consignee names</p>
+        <p className="mb-1 text-sm font-medium">Other buyer and ship-to names</p>
         <p className="mb-3 text-xs text-[var(--muted)]">
-          Every name on this party — the buyer, the consignee and any added here — can be picked as the buyer or as the consignee when a quotation or proforma is raised.
+          Every name on this party — the buyer, the ship-to name and any added here — can be picked as the buyer or as the consignee when a quotation or proforma is raised.
         </p>
         {altBuyers.map((b, i) => (
           <div key={i} className="mb-2 grid items-end gap-3 md:grid-cols-[1fr_2fr_auto]">
@@ -738,8 +736,6 @@ function PartiesPage() {
     { label: "Currency", value: (r) => r.p.currency, width: 10 },
     { label: "Shipment term", value: (r) => r.p.shipmentTerm },
     { label: "Payment term", value: (r) => r.p.paymentTerm, width: 30 },
-    { label: "Port of loading", value: (r) => r.p.portOfLoading },
-    { label: "Destination port", value: (r) => r.p.destinationPort },
     { label: "Product", value: (r) => (r.prod ? r.prod.name : ""), width: 30 },
     { label: "HSN", value: (r) => (r.prod ? r.prod.hsn : "") },
     { label: "Rate / box", value: (r) => (r.prod ? r.prod.rate : "") },
@@ -751,7 +747,7 @@ function PartiesPage() {
 
   return (
     <div>
-      <PageHead title="Parties" blurb="Buyer, consignee, terms, ports and per-product pricing. Everything downstream reads from here." />
+      <PageHead title="Parties" blurb="Buyer, ship-to, terms and per-product pricing. Everything downstream reads from here." />
 
       <div className="mb-5 flex items-center justify-between">
         <div className="flex gap-1 rounded-lg border border-[var(--line)] p-1">
@@ -1240,6 +1236,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
   const saved = editing ? {
     docNo: editing.docNo, partyId: editing.partyId, quotationRef: editing.quotationRef,
     orderNo: editing.buyerOrderNo, orderDate: editing.buyerOrderDate, items: editing.items,
+    portOfLoading: editing.portOfLoading || "", destinationPort: editing.destinationPort || "",
     extra: editing.additionalDetails, taxRate: editing.taxRate,
     buyer: { name: editing.buyerName, address: editing.buyerAddress },
     consignee: editing.consigneeName ? { name: editing.consigneeName, address: editing.consigneeAddress } : null,
@@ -1271,6 +1268,12 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
   const party = store.parties.find((p) => p.id === partyId);
   // Typed by hand (db/013) — the database refuses a blank or repeated number.
   const [docNo, setDocNo] = useState(saved.docNo || "");
+  // Ports belong to the proforma, not the party (decisions/014), so they are
+  // typed here. A party saved before that change may still hold a pair: it is
+  // offered as the starting value, in plain sight — never used unseen.
+  const portsOf = (p) => ({ loading: (p && p.portOfLoading) || "", destination: (p && p.destinationPort) || "" });
+  const [portOfLoading, setPortOfLoading] = useState(saved.portOfLoading ?? portsOf(party).loading);
+  const [destinationPort, setDestinationPort] = useState(saved.destinationPort ?? portsOf(party).destination);
   const [quotationRef, setQuotationRef] = useState(saved.quotationRef || "");
   const [orderNo, setOrderNo] = useState(saved.orderNo || "");
   const [orderDate, setOrderDate] = useState(saved.orderDate || todayIST());
@@ -1351,7 +1354,11 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
             onChange={(e) => setDocNo(e.target.value)} />
         </Field>
         <Field label="Party">
-          <select className={input} value={partyId} onChange={(e) => { setPartyId(e.target.value); setItems([]); setBuyerIdx(0); setConsigneeIdx(null); }}>
+          <select className={input} value={partyId} onChange={(e) => {
+            const next = store.parties.find((p) => p.id === e.target.value);
+            setPartyId(e.target.value); setItems([]); setBuyerIdx(0); setConsigneeIdx(null);
+            setPortOfLoading(portsOf(next).loading); setDestinationPort(portsOf(next).destination);
+          }}>
             {eligible.map((p) => <option key={p.id} value={p.id}>{p.buyerName}</option>)}
           </select>
         </Field>
@@ -1379,9 +1386,15 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
           </select>
         </Field>
         {!isIntl && <Field label="Tax rate (%)"><input type="number" className={input} value={taxRate} onChange={(e) => setTaxRate(e.target.value)} /></Field>}
+        {isIntl && (
+          <React.Fragment>
+            <Field label="Port of loading"><input className={input} value={portOfLoading} onChange={(e) => setPortOfLoading(e.target.value)} /></Field>
+            <Field label="Destination port"><input className={input} value={destinationPort} onChange={(e) => setDestinationPort(e.target.value)} /></Field>
+          </React.Fragment>
+        )}
       </div>
 
-      <div className={panel + " mb-5 grid gap-4 p-4 text-xs md:grid-cols-4"}>
+      <div className={panel + " mb-5 grid gap-4 p-4 text-xs md:grid-cols-3"}>
         <div>
           <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Buyer</p>
           <p>{buyer.name}</p><p className="text-[var(--muted)]">{buyer.address}</p>
@@ -1391,15 +1404,11 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
           <p>{consignee.name || "—"}</p><p className="text-[var(--muted)]">{consignee.address}</p>
         </div>
         <div>
-          <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Ports</p>
-          <p>Loading: {party.portOfLoading || "—"}</p><p>Destination: {party.destinationPort || "—"}</p>
-        </div>
-        <div>
           <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Terms</p>
           <p>{party.shipmentTerm || "—"} · {party.currency}</p><p className="text-[var(--muted)]">{party.paymentTerm}</p>
         </div>
         {conditionsFromText(party.conditions).length > 0 && (
-          <div className="md:col-span-4">
+          <div className="md:col-span-3">
             <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Conditions</p>
             {conditionsFromText(party.conditions).map((c, i) => <p key={i} className="text-[var(--muted)]">{i + 1}. {c}</p>)}
           </div>
@@ -1461,6 +1470,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
               title: [docNo.trim(), buyer.name, orderNo ? "order " + orderNo : "", totalBoxes + " boxes"].filter(Boolean).join(" · "),
               payload: {
                 docNo, type, partyId, quotationRef, orderNo, orderDate, items, extra, taxRate,
+                portOfLoading, destinationPort,
                 buyer: { name: buyer.name, address: buyer.address },
                 consignee: consigneeIdx === null || !choices[consigneeIdx] ? null : { name: consignee.name, address: consignee.address },
               },
@@ -1474,7 +1484,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
             // Every name on the party travels with the proforma, so the shipment
             // form can still name any of them as the consignee.
             consigneeOptions: Array.from(new Set([...choices.map((c) => c.name), ...(party.consigneeOptions || [])].filter(Boolean))),
-            portOfLoading: party.portOfLoading, destinationPort: party.destinationPort,
+            portOfLoading: isIntl ? portOfLoading.trim() : "", destinationPort: isIntl ? destinationPort.trim() : "",
             paymentTerm: party.paymentTerm, shipmentTerm: party.shipmentTerm, conditions: party.conditions,
             currency: party.currency, buyerOrderNo: orderNo, buyerOrderDate: orderDate, items, additionalDetails: extra,
             totalBoxes, totalValue, taxableValue, taxRate, taxAmount,
@@ -1526,11 +1536,13 @@ function ProformaDocument({ pi, company }) {
       </div>
 
       <div style={{ display: "flex", gap: 32, marginTop: 12 }}>
-        <div style={{ flex: 1 }}>
-          <p className="muted" style={small}>Ports</p>
-          <p style={{ margin: "3px 0 0" }}>Loading: {pi.portOfLoading || "—"}</p>
-          <p style={{ margin: 0 }}>Destination: {pi.destinationPort || "—"}</p>
-        </div>
+        {(pi.portOfLoading || pi.destinationPort) && (
+          <div style={{ flex: 1 }}>
+            <p className="muted" style={small}>Ports</p>
+            <p style={{ margin: "3px 0 0" }}>Loading: {pi.portOfLoading || "—"}</p>
+            <p style={{ margin: 0 }}>Destination: {pi.destinationPort || "—"}</p>
+          </div>
+        )}
         <div style={{ flex: 1 }}>
           <p className="muted" style={small}>Terms</p>
           <p style={{ margin: "3px 0 0" }}>Shipment: {pi.shipmentTerm || "—"} · Currency: {pi.currency}</p>
