@@ -163,7 +163,7 @@ describe("IFSC is gone", () => {
     const html = draw(<CompanyPage />);
     expect(html).not.toMatch(/IFSC/i);
     expect(html).not.toContain("HDFC0000123");
-    expect(html).toContain("SWIFT");
+    expect(html).toContain("Swift code");
     expect(COMPANY_KEYS).not.toContain("ifsc");
     expect(emptyStore().company).not.toHaveProperty("ifsc");
   });

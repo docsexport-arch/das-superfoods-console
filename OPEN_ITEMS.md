@@ -21,8 +21,8 @@ a green build.
 ## Owed by the build
 
 **At promotion**
-- [ ] Apply `db/pending/015_lockdown_direct_writes.sql` once the RPC-only client
-      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 15 in the same
+- [ ] Apply `db/pending/016_lockdown_direct_writes.sql` once the RPC-only client
+      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 16 in the same
       commit. Until then the tables still accept direct writes from a signed-in
       user who has the grant.
 - [ ] Then drop the three legacy columns (`access_documents`, `access_parties`,
@@ -36,8 +36,9 @@ a green build.
 **Next increment — usability the Bible requires**
 - [ ] Tables: sortable headers and reorderable columns from one column registry.
 - [ ] Inline edit where data is shown; retire a proforma while it is open (edit exists — decisions/011).
-- [ ] PDF for the proforma, and for the shipment's three documents (tax invoice,
-      commercial invoice, packing list). Quotation PDF exists.
+- [ ] PDF for the shipment's three documents (tax invoice, commercial invoice,
+      packing list). Quotation and proforma have theirs. When built, add account
+      name and branch to the company snapshot in `create_shipment` (decisions/013).
 - [ ] Home as a briefing — one sentence saying what needs attention — not stat cards.
 - [ ] Units alongside boxes on quotation lines (proforma and shipment have them).
 - [ ] A currency on the quotation, so its amount-in-words names one.

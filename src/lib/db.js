@@ -169,6 +169,9 @@ export const shipmentFromRow = (r) => ({
 
 export const companyFromRow = (r) => ({
   name: r.name, address: r.address, bankName: r.bank_name, accountNo: r.account_no,
+  // The beneficiary name and the branch (db/015). Blank, never undefined, on a
+  // row read before those columns existed.
+  accountName: r.account_name || "", bankBranch: r.bank_branch || "",
   swift: r.swift, gstNo: r.gst_no, iecCode: r.iec_code,
 });
 
@@ -194,7 +197,7 @@ export const draftFromRow = (r) => ({
 
 export const emptyStore = () => ({
   users: [],
-  company: { name: "", address: "", bankName: "", accountNo: "", swift: "", gstNo: "", iecCode: "" },
+  company: { name: "", address: "", bankName: "", accountNo: "", accountName: "", bankBranch: "", swift: "", gstNo: "", iecCode: "" },
   parties: [], quotations: [], pis: [], finalInvoices: [], drafts: [], audit: [], migrationIds: [],
 });
 

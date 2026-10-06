@@ -1596,10 +1596,12 @@ function ProformaDocument({ pi, company }) {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 28 }}>
         <div>
-          <p className="muted" style={small}>Bank details</p>
-          <p style={{ margin: "3px 0 0" }}>{company.bankName || "—"}</p>
-          <p style={{ margin: 0 }}>Account: {company.accountNo || "—"}</p>
-          <p style={{ margin: 0 }}>SWIFT: {company.swift || "—"}</p>
+          <p style={{ margin: 0, fontWeight: "bold" }}>BANK DETAILS FOR TRANSFER</p>
+          <p style={{ margin: "3px 0 0" }}><b>Account Name:</b> {company.accountName || "—"}</p>
+          <p style={{ margin: 0 }}><b>Bank:</b> {company.bankName || "—"}</p>
+          <p style={{ margin: 0 }}><b>Branch:</b> {company.bankBranch || "—"}</p>
+          <p style={{ margin: 0 }}><b>Account Number:</b> {company.accountNo || "—"}</p>
+          <p style={{ margin: 0 }}><b>Swift Code:</b> {company.swift || "—"}</p>
         </div>
         <div style={{ textAlign: "right" }}>
           <p style={{ margin: 0 }}>For <b>{company.name || "Das Superfoods"}</b></p>
@@ -2220,11 +2222,24 @@ function CompanyPage() {
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Company name" className="md:col-span-2"><input className={input} value={draft.name} onChange={(e) => set("name", e.target.value)} /></Field>
           <Field label="Registered address" className="md:col-span-2"><input className={input} value={draft.address} onChange={(e) => set("address", e.target.value)} /></Field>
-          <Field label="Bank name"><input className={input} value={draft.bankName} onChange={(e) => set("bankName", e.target.value)} /></Field>
-          <Field label="Account no."><input className={input} value={draft.accountNo} onChange={(e) => set("accountNo", e.target.value)} /></Field>
-          <Field label="SWIFT"><input className={input} value={draft.swift} onChange={(e) => set("swift", e.target.value)} /></Field>
           <Field label="GST no."><input className={input} value={draft.gstNo} onChange={(e) => set("gstNo", e.target.value)} /></Field>
           <Field label="IEC code"><input className={input} value={draft.iecCode} onChange={(e) => set("iecCode", e.target.value)} /></Field>
+        </div>
+
+        <p className="mb-1 mt-7 text-sm font-medium">Bank details for transfer</p>
+        <p className="mb-4 text-xs text-[var(--muted)]">
+          Printed on every proforma exactly as typed here, so the buyer knows where to send the payment. Check each one against the bank's own letter.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Account name" hint="The name the account is held in, as the bank has it" className="md:col-span-2">
+            <input className={input} value={draft.accountName || ""} onChange={(e) => set("accountName", e.target.value)} />
+          </Field>
+          <Field label="Bank"><input className={input} value={draft.bankName} onChange={(e) => set("bankName", e.target.value)} /></Field>
+          <Field label="Account number"><input className={input} value={draft.accountNo} onChange={(e) => set("accountNo", e.target.value)} /></Field>
+          <Field label="Branch" hint="Branch name and its address" className="md:col-span-2">
+            <input className={input} value={draft.bankBranch || ""} onChange={(e) => set("bankBranch", e.target.value)} />
+          </Field>
+          <Field label="Swift code"><input className={input} value={draft.swift} onChange={(e) => set("swift", e.target.value)} /></Field>
         </div>
         <div className="mt-6 flex items-center justify-end gap-4" aria-live="polite">
           {saveError && <span className={errText}>{saveError}</span>}

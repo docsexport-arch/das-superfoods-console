@@ -114,9 +114,9 @@ describe("the proforma as rows — what the Excel download contains", () => {
     expect(find("Amount in words")[1]).toBe("US Dollars fifty six thousand eight hundred sixty four only");
     expect(find("Conditions")).toEqual(["Conditions", "Subject to Ahmedabad jurisdiction"]);
     expect(find("Bank")).toEqual(["Bank", "HDFC Bank"]);
-    expect(find("Account no.")[1]).toBe("50200012345678");
-    expect(typeof find("Account no.")[1]).toBe("string");
-    expect(find("SWIFT")).toEqual(["SWIFT", "HDFCINBB"]);
+    expect(find("Account Number")[1]).toBe("50200012345678");
+    expect(typeof find("Account Number")[1]).toBe("string");
+    expect(find("Swift Code")).toEqual(["Swift Code", "HDFCINBB"]);
   });
 
   it("a private-label proforma is priced by MRP and shows tax and grand total", () => {
@@ -174,7 +174,7 @@ describe("the proforma on screen and on paper", () => {
       "Loading: Mundra", "Destination: New York", "Shipment: FOB", "Payment: 30% advance",
       "Peanut Butter Crunchy 340g", "12000", "35,540.00", "19200", "56,864.00",
       "US Dollars fifty six thousand eight hundred sixty four only",
-      "HDFC Bank", "Account: 50200012345678", "SWIFT: HDFCINBB", "Authorised signatory",
+      "<b>Bank:</b> HDFC Bank", "<b>Account Number:</b> 50200012345678", "<b>Swift Code:</b> HDFCINBB", "Authorised signatory",
     ]) expect(html, s).toContain(s);
     // No IFSC on any document, even though this company fixture still carries one.
     expect(html).not.toMatch(/IFSC/i);

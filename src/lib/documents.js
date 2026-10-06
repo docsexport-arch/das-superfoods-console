@@ -53,9 +53,14 @@ export function proformaSheetRows(pi, company = {}) {
   if (pi.additionalDetails) rows.push(["Additional details", pi.additionalDetails]);
   rows.push(
     [],
+    // The five lines a buyer needs to send a transfer, in the order the desk
+    // gives them. The account number stays text so Excel keeps every digit.
+    ["BANK DETAILS FOR TRANSFER"],
+    ["Account Name", company.accountName || ""],
     ["Bank", company.bankName || ""],
-    ["Account no.", String(company.accountNo || "")],
-    ["SWIFT", company.swift || ""],
+    ["Branch", company.bankBranch || ""],
+    ["Account Number", String(company.accountNo || "")],
+    ["Swift Code", company.swift || ""],
   );
   return rows;
 }

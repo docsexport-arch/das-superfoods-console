@@ -31,7 +31,7 @@ export const SHIPMENT_KEYS = [
   "containerNo", "vehicleNo", "customSeal", "lineSeal", "portOfLoading", "incoterm",
 ];
 export const COMPANY_KEYS = [
-  "name", "address", "bankName", "accountNo", "swift", "gstNo", "iecCode",
+  "name", "address", "accountName", "bankName", "bankBranch", "accountNo", "swift", "gstNo", "iecCode",
 ];
 export const USER_ACCESS_KEYS = ["role", "fullName", "active", "sections"];
 // A saved draft. `payload` is the form's own state and is stored as it is —
