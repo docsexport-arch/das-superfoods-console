@@ -109,7 +109,7 @@ describe("saving the other names", () => {
 describe("the screens", () => {
   it("party form — the section is there on a new party, and prefilled on an edit", () => {
     const fresh = draw(<PartyForm tab="international" onSave={() => {}} onCancel={() => {}} />);
-    expect(fresh).toContain("Other buyer and ship-to names");
+    expect(fresh).toContain("Other buyer or consignee");
     expect(fresh).toContain("Add another name");
     expect(fresh).not.toContain("Other name 1");
 

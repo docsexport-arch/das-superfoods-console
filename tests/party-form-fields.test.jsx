@@ -42,18 +42,44 @@ const partyForm = (tab, initial) => draw(<PartyForm tab={tab} initial={initial} 
 const proformaForm = (type, parties, props = {}) => draw(<ProformaForm type={type} onSave={() => {}} onSaveDraft={() => {}} onCancel={() => {}} {...props} />, parties);
 
 describe("the party form", () => {
-  it("says Ship to and Shipping address, not consignee", () => {
-    const names = labels(partyForm("international"));
-    expect(names).toContain("Ship to");
-    expect(names).toContain("Shipping address");
-    expect(names).not.toContain("Consignee name");
-    expect(names).not.toContain("Consignee address");
+  // decisions/017: the second party is called what the desk calls it — the
+  // consignee on an international party, the ship-to on a private-label one.
+  it("an international party says Consignee and Consignee address", () => {
+    const html = partyForm("international");
+    const names = labels(html);
+    expect(names).toContain("Consignee");
+    expect(names).toContain("Consignee address");
+    expect(names).not.toContain("Ship to");
+    expect(names).not.toContain("Shipping address");
+    expect(html).toContain("Other buyer or consignee");
+    expect(html).toContain("the buyer, the consignee and any added here");
+    expect(html).not.toMatch(/ship-to|Ship to|Shipping address/);
   });
 
-  it("shows what was saved as the consignee in the Ship to boxes — a new label, the same data", () => {
+  it("a private-label party still says Ship to and Shipping address", () => {
+    const html = partyForm("domestic");
+    const names = labels(html);
+    expect(names).toContain("Ship to");
+    expect(names).toContain("Shipping address");
+    expect(names).not.toContain("Consignee");
+    expect(names).not.toContain("Consignee address");
+    expect(html).toContain("Other buyer and ship-to names");
+    expect(html).toContain("the buyer, the ship-to name and any added here");
+    expect(html).not.toContain("Other buyer or consignee");
+  });
+
+  it("the wording follows the kind of party being edited, not just a new one", () => {
+    expect(labels(partyForm("international", older))).toContain("Consignee address");
+    expect(labels(partyForm("domestic", domestic))).toContain("Shipping address");
+  });
+
+  it("it is the same two fields under either name — a label, not different data", () => {
     const html = partyForm("international", older);
-    expect(field(html, "Ship to")).toContain('value="Crosschannel Logistics"');
-    expect(field(html, "Shipping address")).toContain('value="Port Newark"');
+    expect(field(html, "Consignee")).toContain('value="Crosschannel Logistics"');
+    expect(field(html, "Consignee address")).toContain('value="Port Newark"');
+    const pl = partyForm("domestic", { ...domestic, consigneeName: "MRK Foods Pvt Ltd", consigneeAddress: "Bhandup, Mumbai" });
+    expect(field(pl, "Ship to")).toContain('value="MRK Foods Pvt Ltd"');
+    expect(field(pl, "Shipping address")).toContain('value="Bhandup, Mumbai"');
     for (const k of ["consigneeName", "consigneeAddress"]) expect(PARTY_KEYS).toContain(k);
   });
 

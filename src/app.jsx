@@ -603,6 +603,12 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
     return list.length ? list : [""];
   });
   const set = (k, v) => setF({ ...f, [k]: v });
+  // The second party on the form is the same field for both kinds of party, but
+  // it is called what the desk calls it: the consignee on an export party, the
+  // ship-to on a private-label one (decisions/017).
+  const names = tab === "international"
+    ? { name: "Consignee", address: "Consignee address", others: "Other buyer or consignee", inHint: "the consignee" }
+    : { name: "Ship to", address: "Shipping address", others: "Other buyer and ship-to names", inHint: "the ship-to name" };
   const altBuyers = f.altBuyers || [];
   const setAlt = (i, k, v) => set("altBuyers", altBuyers.map((b, j) => (j === i ? { ...b, [k]: v } : b)));
 
@@ -620,8 +626,8 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
       <div className="mb-5 grid gap-4 md:grid-cols-3">
         <Field label="Buyer name"><input className={input} value={f.buyerName} onChange={(e) => set("buyerName", e.target.value)} /></Field>
         <Field label="Buyer address" className="md:col-span-2"><input className={input} value={f.buyerAddress} onChange={(e) => set("buyerAddress", e.target.value)} /></Field>
-        <Field label="Ship to"><input className={input} value={f.consigneeName} onChange={(e) => set("consigneeName", e.target.value)} /></Field>
-        <Field label="Shipping address" className="md:col-span-2"><input className={input} value={f.consigneeAddress} onChange={(e) => set("consigneeAddress", e.target.value)} /></Field>
+        <Field label={names.name}><input className={input} value={f.consigneeName} onChange={(e) => set("consigneeName", e.target.value)} /></Field>
+        <Field label={names.address} className="md:col-span-2"><input className={input} value={f.consigneeAddress} onChange={(e) => set("consigneeAddress", e.target.value)} /></Field>
         <Field label="Country"><input className={input} value={f.country} onChange={(e) => set("country", e.target.value)} /></Field>
         <Field label="Currency">
           <select className={input} value={f.currency} onChange={(e) => set("currency", e.target.value)}>
@@ -653,9 +659,9 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
         </button>
       </div>
       <div className="mb-5">
-        <p className="mb-1 text-sm font-medium">Other buyer and ship-to names</p>
+        <p className="mb-1 text-sm font-medium">{names.others}</p>
         <p className="mb-3 text-xs text-[var(--muted)]">
-          Every name on this party — the buyer, the ship-to name and any added here — can be picked as the buyer or as the consignee when a quotation or proforma is raised.
+          Every name on this party — the buyer, {names.inHint} and any added here — can be picked as the buyer or as the consignee when a quotation or proforma is raised.
         </p>
         {altBuyers.map((b, i) => (
           <div key={i} className="mb-2 grid items-end gap-3 md:grid-cols-[1fr_2fr_auto]">
