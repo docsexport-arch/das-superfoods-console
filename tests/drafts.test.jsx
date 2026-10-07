@@ -78,11 +78,14 @@ describe("weights on the party form are in grams per box", () => {
     for (const g of [1, 12.5, 340, 999, 13600, 25000]) expect(gramsFromKg(kgFromGrams(g))).toBe(g);
   });
 
-  it("the form shows grams, says so in the column, and has no g / pack column", () => {
+  it("a product typed in grams still shows in grams, and there is no g / pack column", () => {
+    // The unit is now a choice per line (db/019, tests/weight-unit.test.jsx);
+    // a line saved before that choice existed was typed in grams and stays so.
     const html = draw(<PartyForm tab="international" initial={party} onSave={() => {}} onCancel={() => {}} />);
-    for (const s of ["Net wt / box (g)", "Gross wt / box (g)", "Packs / box"]) expect(html).toContain(s);
-    expect(html).toMatch(/aria-label="Net weight per box in grams"[^>]*value="1360"/);
-    expect(html).toMatch(/aria-label="Gross weight per box in grams"[^>]*value="1520"/);
+    for (const s of ["Net wt / box", "Gross wt / box", "Weight unit", "Packs / box"]) expect(html).toContain(s);
+    expect(html).toMatch(/aria-label="Net weight per box"[^>]*value="1360"/);
+    expect(html).toMatch(/aria-label="Gross weight per box"[^>]*value="1520"/);
+    expect(html).toMatch(/aria-label="Weight unit"[^>]*>[\s\S]*?<option value="g" selected="">g<\/option>/);
     expect(html.toLowerCase()).not.toContain("g / pack");
   });
 
@@ -90,9 +93,9 @@ describe("weights on the party form are in grams per box", () => {
     // Class: the form's own gram fields leaking into the payload, or a weight
     // going to the database a thousand times too heavy.
     const src = readFileSync(join(ROOT, "src", "app.jsx"), "utf8");
-    expect(src).toMatch(/netWt: kgFromGrams\(netWtG\), grossWt: kgFromGrams\(grossWtG\)/);
-    // The gram fields are the form's own; pick() sends only the listed keys.
-    for (const k of ["netWtG", "grossWtG"]) expect(PARTY_PRODUCT_KEYS).not.toContain(k);
+    expect(src).toMatch(/netWt: kgFromWeight\(netWtIn, p\.weightUnit\), grossWt: kgFromWeight\(grossWtIn, p\.weightUnit\)/);
+    // The as-typed fields are the form's own; pick() sends only the listed keys.
+    for (const k of ["netWtG", "grossWtG", "netWtIn", "grossWtIn"]) expect(PARTY_PRODUCT_KEYS).not.toContain(k);
     expect(PARTY_PRODUCT_KEYS).toEqual(expect.arrayContaining(["netWt", "grossWt", "packsPerBox"]));
   });
 });

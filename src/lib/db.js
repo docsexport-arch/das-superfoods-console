@@ -96,6 +96,9 @@ export const partyFromRow = (r, products) => ({
     packsPerBox: num(p.packs_per_box), weightPerPackG: num(p.weight_per_pack_g),
     // Each product's own shelf life (db/018). "months" on a row that predates it.
     shelfLife: num(p.shelf_life), shelfLifeUnit: p.shelf_life_unit === "years" ? "years" : "months",
+    // The unit this line's weights were typed in (db/019); netWt and grossWt
+    // themselves are always kilograms. Grams on a row that predates the choice.
+    weightUnit: ["g", "kg", "mt"].includes(p.weight_unit) ? p.weight_unit : "g",
   })),
 });
 

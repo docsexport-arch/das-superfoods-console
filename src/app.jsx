@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
 import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, partyNames, withTimeout, humanise } from "./lib/db.js";
-import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, gramsFromKg, kgFromGrams, conditionsFromText, conditionsToText, shelfLifeText, SHELF_LIFE_UNITS } from "./lib/format.js";
+import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, WEIGHT_UNITS, weightUnitOf, kgFromWeight, weightFromKg, conditionsFromText, conditionsToText, shelfLifeText, SHELF_LIFE_UNITS } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
 import { exportRows, exportBook } from "./lib/excel.js";
@@ -545,9 +545,11 @@ function Overview({ onNavigate }) {
 /* --------------------------------------------------------------- parties */
 function ProductRows({ products, setProducts, mode }) {
   const update = (id, field, val) => setProducts(products.map((p) => (p.id === id ? { ...p, [field]: val } : p)));
-  // Weights are typed in grams per box here (netWtG / grossWtG); the party form
-  // turns them into the kilograms that are stored when it saves.
-  const add = () => setProducts([...products, { id: tempId(), name: "", hsn: "", rate: 0, mrp: 0, netWtG: 0, grossWtG: 0, packsPerBox: 1, weightPerPackG: 0, shelfLife: "", shelfLifeUnit: "months" }]);
+  // Weights are typed here per box in the line's own unit (netWtIn / grossWtIn
+  // with weightUnit: g, kg or MT); the party form turns them into the kilograms
+  // that are stored when it saves. Changing the unit changes what the typed
+  // number means — it does not convert the number, exactly as with shelf life.
+  const add = () => setProducts([...products, { id: tempId(), name: "", hsn: "", rate: 0, mrp: 0, netWtIn: 0, grossWtIn: 0, weightUnit: "g", packsPerBox: 1, weightPerPackG: 0, shelfLife: "", shelfLifeUnit: "months" }]);
   return (
     <div className={panel + " overflow-x-auto"}>
       <table className="w-full">
@@ -555,7 +557,7 @@ function ProductRows({ products, setProducts, mode }) {
           <tr>
             <th className={th}>Product</th><th className={th}>HSN</th>
             <th className={th}>{mode === "international" ? "Rate / box" : "MRP / box"}</th>
-            <th className={th}>Net wt / box (g)</th><th className={th}>Gross wt / box (g)</th>
+            <th className={th}>Net wt / box</th><th className={th}>Gross wt / box</th><th className={th}>Weight unit</th>
             <th className={th}>Packs / box</th><th className={th}>Shelf life</th><th></th>
           </tr>
         </thead>
@@ -569,8 +571,13 @@ function ProductRows({ products, setProducts, mode }) {
                   ? <input type="number" step="0.01" className={input} value={p.rate} onChange={(e) => update(p.id, "rate", e.target.value)} />
                   : <input type="number" step="0.01" className={input} value={p.mrp} onChange={(e) => update(p.id, "mrp", e.target.value)} />}
               </td>
-              <td className="px-2 py-1.5"><input type="number" step="1" min="0" aria-label="Net weight per box in grams" className={input} value={p.netWtG} onChange={(e) => update(p.id, "netWtG", e.target.value)} /></td>
-              <td className="px-2 py-1.5"><input type="number" step="1" min="0" aria-label="Gross weight per box in grams" className={input} value={p.grossWtG} onChange={(e) => update(p.id, "grossWtG", e.target.value)} /></td>
+              <td className="px-2 py-1.5"><input type="number" step="any" min="0" aria-label="Net weight per box" className={input} value={p.netWtIn} onChange={(e) => update(p.id, "netWtIn", e.target.value)} /></td>
+              <td className="px-2 py-1.5"><input type="number" step="any" min="0" aria-label="Gross weight per box" className={input} value={p.grossWtIn} onChange={(e) => update(p.id, "grossWtIn", e.target.value)} /></td>
+              <td className="px-2 py-1.5">
+                <select aria-label="Weight unit" className={input + " min-w-[5rem]"} value={weightUnitOf(p.weightUnit)} onChange={(e) => update(p.id, "weightUnit", e.target.value)}>
+                  {WEIGHT_UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
+                </select>
+              </td>
               <td className="px-2 py-1.5"><input type="number" aria-label="Packs per box" className={input} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} /></td>
               {/* Each product has its own shelf life: a length, and whether that is months or years. */}
               <td className="px-2 py-1.5">
@@ -597,10 +604,24 @@ function ProductRows({ products, setProducts, mode }) {
   );
 }
 
+/* A product row as the party form holds it: weights as typed, in the row's own
+   unit. A saved party gives kilograms plus the unit they were typed in, so the
+   number is shown back the way it was entered. A draft holds the row as it was
+   left; one saved before units existed holds grams (netWtG / grossWtG).     */
+function productFormRow(p) {
+  if (p.netWtIn !== undefined || p.grossWtIn !== undefined) return { ...p, weightUnit: weightUnitOf(p.weightUnit) };
+  if (p.netWtG !== undefined || p.grossWtG !== undefined) {
+    const { netWtG, grossWtG, ...rest } = p;
+    return { ...rest, weightUnit: "g", netWtIn: netWtG, grossWtIn: grossWtG };
+  }
+  const unit = weightUnitOf(p.weightUnit);
+  return { ...p, weightUnit: unit, netWtIn: weightFromKg(p.netWt, unit), grossWtIn: weightFromKg(p.grossWt, unit) };
+}
+
 function PartyForm({ tab, initial, draft, onSave, onSaveDraft, onCancel, closable = true, cancelLabel = "Cancel" }) {
   const isEdit = Boolean(initial);
   // Continuing a draft (db/017): the form starts exactly as it was left — the
-  // boxes, the product rows with their weights in grams, the list of conditions.
+  // boxes, the product rows with their weights as typed, the list of conditions.
   const left = draft && draft.payload && typeof draft.payload === "object" ? draft.payload : null;
   const blank = {
     type: tab, buyerName: "", buyerAddress: "", consigneeName: "", consigneeAddress: "",
@@ -611,7 +632,7 @@ function PartyForm({ tab, initial, draft, onSave, onSaveDraft, onCancel, closabl
   const [f, setF] = useState(() => initial || (left && left.f && typeof left.f === "object" ? { ...blank, ...left.f, type: tab } : blank));
   const [products, setProducts] = useState(() => (left && Array.isArray(left.products)
     ? left.products
-    : (initial ? initial.products : []).map((p) => ({ ...p, netWtG: gramsFromKg(p.netWt), grossWtG: gramsFromKg(p.grossWt) }))));
+    : (initial ? initial.products : [])).map(productFormRow));
   // Conditions are edited as a list and saved as one text, a condition per
   // line. There is always at least one box to type into.
   const [conditions, setConditions] = useState(() => {
@@ -708,8 +729,11 @@ function PartyForm({ tab, initial, draft, onSave, onSaveDraft, onCancel, closabl
         <button
           onClick={() => {
             const consigneeOptions = Array.from(new Set([...(f.consigneeOptions || []), f.consigneeName].filter(Boolean)));
-            // Typed in grams per box, stored in kilograms per box.
-            const lines = products.map(({ netWtG, grossWtG, ...p }) => ({ ...p, netWt: kgFromGrams(netWtG), grossWt: kgFromGrams(grossWtG) }));
+            // Typed per box in the line's own unit; stored in kilograms per box, with the unit beside it.
+            const lines = products.map(({ netWtIn, grossWtIn, ...p }) => ({
+              ...p, weightUnit: weightUnitOf(p.weightUnit),
+              netWt: kgFromWeight(netWtIn, p.weightUnit), grossWt: kgFromWeight(grossWtIn, p.weightUnit),
+            }));
             const party = { ...f, conditions: conditionsToText(conditions), products: lines, consigneeOptions };
             onSave(isEdit ? party : { id: tempId(), ...party });
           }}

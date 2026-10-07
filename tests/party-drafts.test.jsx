@@ -93,8 +93,10 @@ describe("continuing a party draft", () => {
       expect(html, v).toContain(`value="${v}"`);
     }
     expect(html).toContain("Condition 2");
-    expect(html).toMatch(/aria-label="Net weight per box in grams"[^>]*value="12000"/);
-    expect(html).toMatch(/aria-label="Gross weight per box in grams"[^>]*value="12850"/);
+    // This draft was saved before a weight unit could be chosen: it holds grams.
+    expect(html).toMatch(/aria-label="Net weight per box"[^>]*value="12000"/);
+    expect(html).toMatch(/aria-label="Gross weight per box"[^>]*value="12850"/);
+    expect(html).toMatch(/aria-label="Weight unit"[^>]*>[\s\S]*?<option value="g" selected="">g<\/option>/);
   });
 
   it("a draft with almost nothing in it still opens, with the usual empty boxes", () => {

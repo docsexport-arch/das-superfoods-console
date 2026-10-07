@@ -136,6 +136,18 @@ export const conditionsFromText = (text) =>
 export const conditionsToText = (list) =>
   (list || []).map((line) => String(line || "").replace(/\s*\r?\n\s*/g, " ").trim()).filter(Boolean).join("\n");
 
+// A product's weights can be typed in grams, kilograms or MT (db/019) — one
+// unit per product line, covering net and gross. Whatever is chosen, the
+// weight is STORED in kilograms per box: the unit only says how the line was
+// typed, so the form can show it back the same way. Rounded so 1360 g is
+// 1.36 kg and 12 kg is 0.012 MT, with no stray digits from floating point.
+export const WEIGHT_UNITS = [{ key: "g", label: "g" }, { key: "kg", label: "kg" }, { key: "mt", label: "MT" }];
+const KG_PER_UNIT = { g: 0.001, kg: 1, mt: 1000 };
+const tidyWeight = (n) => Math.round(n * 1e9) / 1e9;
+export const weightUnitOf = (unit) => (Object.prototype.hasOwnProperty.call(KG_PER_UNIT, unit) ? unit : "g");
+export const kgFromWeight = (value, unit) => tidyWeight(toNumber(value) * KG_PER_UNIT[weightUnitOf(unit)]);
+export const weightFromKg = (kg, unit) => tidyWeight(toNumber(kg) / KG_PER_UNIT[weightUnitOf(unit)]);
+
 // A product's shelf life is a length and a unit, kept as typed — "2 years" is
 // not turned into 24 months. Nothing given reads as nothing, not "0 months".
 export const SHELF_LIFE_UNITS = ["months", "years"];

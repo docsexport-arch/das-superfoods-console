@@ -1,7 +1,7 @@
 // The highest db/NNN this build was written against. tests/migrations.test.js
 // reads the db/ directory and fails if this number is stale — a stale constant
 // would turn the drift banner green over SQL that was never run (Bible §6).
-export const EXPECTED_MIGRATION = 18;
+export const EXPECTED_MIGRATION = 19;
 
 // Compares the ledger with what this build expects. It reads every id in the
 // window, not just the maximum: a skipped migration in the middle is drift
