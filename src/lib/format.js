@@ -136,6 +136,16 @@ export const conditionsFromText = (text) =>
 export const conditionsToText = (list) =>
   (list || []).map((line) => String(line || "").replace(/\s*\r?\n\s*/g, " ").trim()).filter(Boolean).join("\n");
 
+// A product's shelf life is a length and a unit, kept as typed — "2 years" is
+// not turned into 24 months. Nothing given reads as nothing, not "0 months".
+export const SHELF_LIFE_UNITS = ["months", "years"];
+export function shelfLifeText(value, unit) {
+  const n = toNumber(value);
+  if (!(n > 0)) return "";
+  const u = unit === "years" ? "year" : "month";
+  return `${n} ${u}${n === 1 ? "" : "s"}`;
+}
+
 // A short random id for rows that only exist on screen. The database never
 // sees these as identities — a non-uuid id is how it recognises a new row.
 export const tempId = () => Math.random().toString(36).slice(2, 10);

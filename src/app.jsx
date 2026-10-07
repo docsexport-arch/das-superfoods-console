@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
 import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, partyNames, withTimeout, humanise } from "./lib/db.js";
-import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, gramsFromKg, kgFromGrams, conditionsFromText, conditionsToText } from "./lib/format.js";
+import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, gramsFromKg, kgFromGrams, conditionsFromText, conditionsToText, shelfLifeText, SHELF_LIFE_UNITS } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
 import { exportRows, exportBook } from "./lib/excel.js";
@@ -547,7 +547,7 @@ function ProductRows({ products, setProducts, mode }) {
   const update = (id, field, val) => setProducts(products.map((p) => (p.id === id ? { ...p, [field]: val } : p)));
   // Weights are typed in grams per box here (netWtG / grossWtG); the party form
   // turns them into the kilograms that are stored when it saves.
-  const add = () => setProducts([...products, { id: tempId(), name: "", hsn: "", rate: 0, mrp: 0, netWtG: 0, grossWtG: 0, packsPerBox: 1, weightPerPackG: 0 }]);
+  const add = () => setProducts([...products, { id: tempId(), name: "", hsn: "", rate: 0, mrp: 0, netWtG: 0, grossWtG: 0, packsPerBox: 1, weightPerPackG: 0, shelfLife: "", shelfLifeUnit: "months" }]);
   return (
     <div className={panel + " overflow-x-auto"}>
       <table className="w-full">
@@ -556,7 +556,7 @@ function ProductRows({ products, setProducts, mode }) {
             <th className={th}>Product</th><th className={th}>HSN</th>
             <th className={th}>{mode === "international" ? "Rate / box" : "MRP / box"}</th>
             <th className={th}>Net wt / box (g)</th><th className={th}>Gross wt / box (g)</th>
-            <th className={th}>Packs / box</th><th></th>
+            <th className={th}>Packs / box</th><th className={th}>Shelf life</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -572,6 +572,17 @@ function ProductRows({ products, setProducts, mode }) {
               <td className="px-2 py-1.5"><input type="number" step="1" min="0" aria-label="Net weight per box in grams" className={input} value={p.netWtG} onChange={(e) => update(p.id, "netWtG", e.target.value)} /></td>
               <td className="px-2 py-1.5"><input type="number" step="1" min="0" aria-label="Gross weight per box in grams" className={input} value={p.grossWtG} onChange={(e) => update(p.id, "grossWtG", e.target.value)} /></td>
               <td className="px-2 py-1.5"><input type="number" aria-label="Packs per box" className={input} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} /></td>
+              {/* Each product has its own shelf life: a length, and whether that is months or years. */}
+              <td className="px-2 py-1.5">
+                <span className="flex min-w-[11rem] gap-2">
+                  <input type="number" min="0" step="1" aria-label="Shelf life" className={input + " w-20"} value={toNumber(p.shelfLife) > 0 || p.shelfLife === "" ? p.shelfLife : ""}
+                    onChange={(e) => update(p.id, "shelfLife", e.target.value)} />
+                  <select aria-label="Shelf life in months or years" className={input} value={p.shelfLifeUnit === "years" ? "years" : "months"}
+                    onChange={(e) => update(p.id, "shelfLifeUnit", e.target.value)}>
+                    {SHELF_LIFE_UNITS.map((u) => <option key={u} value={u}>{u === "years" ? "Years" : "Months"}</option>)}
+                  </select>
+                </span>
+              </td>
               <td className="px-2">
                 <button onClick={() => setProducts(products.filter((x) => x.id !== p.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" /></button>
               </td>
@@ -822,6 +833,7 @@ function PartiesPage({ initialView = "create" }) {
     { label: "Units / box", value: (r) => (r.prod ? r.prod.packsPerBox : "") },
     { label: "Net kg / box", value: (r) => (r.prod ? r.prod.netWt : "") },
     { label: "Gross kg / box", value: (r) => (r.prod ? r.prod.grossWt : "") },
+    { label: "Shelf life", value: (r) => (r.prod ? shelfLifeText(r.prod.shelfLife, r.prod.shelfLifeUnit) : "") },
   ];
 
   const count = store.parties.length;

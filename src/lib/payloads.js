@@ -14,6 +14,7 @@ export const PARTY_KEYS = [
 export const ALT_BUYER_KEYS = ["name", "address"];
 export const PARTY_PRODUCT_KEYS = [
   "id", "name", "hsn", "rate", "mrp", "netWt", "grossWt", "packsPerBox", "weightPerPackG",
+  "shelfLife", "shelfLifeUnit",
 ];
 export const QUOTATION_KEYS = [
   "id", "partyId", "buyerName", "buyerAddress", "country", "shipmentTerm",

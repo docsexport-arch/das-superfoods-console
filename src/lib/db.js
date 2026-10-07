@@ -94,6 +94,8 @@ export const partyFromRow = (r, products) => ({
     rate: num(p.rate), mrp: num(p.mrp),
     netWt: num(p.net_wt), grossWt: num(p.gross_wt),
     packsPerBox: num(p.packs_per_box), weightPerPackG: num(p.weight_per_pack_g),
+    // Each product's own shelf life (db/018). "months" on a row that predates it.
+    shelfLife: num(p.shelf_life), shelfLifeUnit: p.shelf_life_unit === "years" ? "years" : "months",
   })),
 });
 
