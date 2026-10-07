@@ -21,16 +21,16 @@ a green build.
 ## Owed by the build
 
 **At promotion**
-- [ ] Apply `db/pending/016_lockdown_direct_writes.sql` once the RPC-only client
-      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 16 in the same
+- [ ] Apply `db/pending/017_lockdown_direct_writes.sql` once the RPC-only client
+      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 17 in the same
       commit. Until then the tables still accept direct writes from a signed-in
       user who has the grant.
 - [ ] Then drop the three legacy columns (`access_documents`, `access_parties`,
       `access_company`) and the legacy branch of `_profiles_sync_access` — they
       exist only for the client that is live today (decisions/006).
-- [ ] Then drop `company_profile.ifsc` and take `'ifsc'` out of the company
-      snapshot in `create_shipment` — in ONE migration, since the function names
-      the column. IFSC is already gone from every screen and document
+- [ ] Then drop `company_profile.ifsc` (the shipment's company block stopped
+      copying it in db/016, so nothing names the column any more). IFSC is
+      already gone from every screen and document
       (decisions/011); the column is kept only because the live client reads it.
 - [ ] Then decide what to do with `parties.port_of_loading` / `destination_port`:
       ports are typed on the proforma now (decisions/014) and the party form no
@@ -40,9 +40,6 @@ a green build.
 **Next increment — usability the Bible requires**
 - [ ] Tables: sortable headers and reorderable columns from one column registry.
 - [ ] Inline edit where data is shown; retire a proforma while it is open (edit exists — decisions/011).
-- [ ] PDF for the shipment's three documents (tax invoice, commercial invoice,
-      packing list). Quotation and proforma have theirs. When built, add account
-      name and branch to the company snapshot in `create_shipment` (decisions/013).
 - [ ] Home as a briefing — one sentence saying what needs attention — not stat cards.
 - [ ] Units alongside boxes on quotation lines (proforma and shipment have them).
 - [ ] A currency on the quotation, so its amount-in-words names one.

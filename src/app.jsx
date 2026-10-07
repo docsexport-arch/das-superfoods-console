@@ -12,7 +12,10 @@ import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, part
 import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, gramsFromKg, kgFromGrams, conditionsFromText, conditionsToText } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
-import { exportRows } from "./lib/excel.js";
+import { exportRows, exportBook } from "./lib/excel.js";
+import {
+  shipmentModel, shipmentCompany, shipmentHeader, shipmentCharges, taxInvoiceTotals, commercialInvoiceTotals, bankRows, shipmentSheets,
+} from "./lib/shipment-docs.js";
 import { proformaSheetRows, proformaLineAmount, proformaUnits, fileSafe, PROFORMA_SHEET_WIDTHS } from "./lib/documents.js";
 import {
   pick, PARTY_KEYS, PARTY_PRODUCT_KEYS, QUOTATION_KEYS, PROFORMA_KEYS, SHIPMENT_KEYS, COMPANY_KEYS, DRAFT_KEYS,
@@ -1809,10 +1812,18 @@ function ProformaPage({ initialTab = "open" }) {
 }
 
 /* ----------------------------------------------------------- shipments */
-function ShipmentForm({ pi, draft, onSave, onSaveDraft, onCancel, error }) {
+function ShipmentForm({ pi, draft, editing, onSave, onSaveDraft, onCancel, error }) {
   const needsRate = pi.currency !== "INR";
-  // Continuing a draft: every field starts as it was left.
-  const saved = (draft && draft.payload) || {};
+  // The form starts from one of three things: the proforma alone, a saved
+  // draft, or — when editing — the shipment itself, read into a draft's shape.
+  const saved = editing ? {
+    exchangeRate: editing.exchangeRate, containerNo: editing.containerNo, vehicleNo: editing.vehicleNo,
+    customSeal: editing.customSeal, lineSeal: editing.lineSeal, portOfLoading: editing.portOfLoading || "",
+    incoterm: editing.incoterm, gstPercent: editing.gstPercent, roundOff: editing.roundOff, freight: editing.freight,
+    otherAdj: editing.otherAdj, otherReason: editing.otherReason,
+    taxConsignee: editing.taxInvoice.consignee, commercialCurrency: editing.commercialInvoice.currency,
+    commercialConsignee: editing.commercialInvoice.consignee, items: editing.items,
+  } : (draft && draft.payload) || {};
   const [exchangeRate, setExchangeRate] = useState(saved.exchangeRate ?? (needsRate ? "" : "1"));
   const [containerNo, setContainerNo] = useState(saved.containerNo || "");
   const [vehicleNo, setVehicleNo] = useState(saved.vehicleNo || "");
@@ -1843,6 +1854,9 @@ function ShipmentForm({ pi, draft, onSave, onSaveDraft, onCancel, error }) {
 
   // One description of the form, used both to raise the shipment and to save it as a draft.
   const current = () => ({
+    // An id makes it an edit; the version it was opened from guards against
+    // overwriting a colleague's change.
+    id: editing ? editing.id : undefined, expectedUpdatedAt: editing ? editing.updatedAt : undefined,
     piId: pi.id, items, freight, otherAdj, otherReason, gstPercent, roundOff, exchangeRate,
     commercialCurrency, commercialConsignee, taxConsignee,
     containerNo, vehicleNo, customSeal, lineSeal, portOfLoading, incoterm,
@@ -1864,7 +1878,8 @@ function ShipmentForm({ pi, draft, onSave, onSaveDraft, onCancel, error }) {
     <div className={card + " mb-6 p-6"}>
       <div className="mb-5 flex items-start justify-between">
         <div>
-          <p className="font-display text-lg">{draft ? "Draft shipment" : "Shipment"} against {pi.docNo}</p>
+          <p className="font-display text-lg">{editing ? `Edit shipment ${editing.docNo}` : `${draft ? "Draft shipment" : "Shipment"} against ${pi.docNo}`}</p>
+          {editing && <p className="mt-1 text-xs text-[var(--muted)]">Invoiced {fmtDate(editing.date)} against {pi.docNo}. The invoice numbers and date do not change; every total is worked out again, and the change is recorded in the audit log.</p>}
           {draft && <p className="mt-1 text-xs text-[var(--muted)]">Continuing the draft saved by {draft.savedBy || "—"} · {fmtWhen(draft.updatedAt)}</p>}
           <p className="mt-1 text-xs text-[var(--muted)]">
             {pi.buyerName} · order {pi.buyerOrderNo || "—"} of {fmtDate(pi.buyerOrderDate)} · one pass produces the tax invoice, commercial invoice and packing list.
@@ -1946,7 +1961,9 @@ function ShipmentForm({ pi, draft, onSave, onSaveDraft, onCancel, error }) {
         </Field>
         <Field label="Commercial invoice consignee">
           <select className={input} value={commercialConsignee} onChange={(e) => setCommercialConsignee(e.target.value)}>
-            {(pi.consigneeOptions && pi.consigneeOptions.length ? pi.consigneeOptions : [pi.consigneeName]).map((c) => <option key={c} value={c}>{c}</option>)}
+            {/* The name already on the shipment stays on offer even if the proforma no longer lists it. */}
+            {Array.from(new Set([...(pi.consigneeOptions && pi.consigneeOptions.length ? pi.consigneeOptions : [pi.consigneeName]), commercialConsignee].filter(Boolean)))
+              .map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </Field>
         <Field label="Commercial invoice currency" hint="Set per shipment, not derived from the payment term">
@@ -1988,9 +2005,173 @@ function ShipmentForm({ pi, draft, onSave, onSaveDraft, onCancel, error }) {
         <span aria-live="polite" className={errText}>{error}</span>
         <button onClick={onCancel} className={btnGhost}>Cancel</button>
         {onSaveDraft && <button onClick={saveAsDraft} disabled={busy} className={btnGhost}>Save draft</button>}
-        <button onClick={submit} disabled={busy} className={btn}>{busy ? "Saving…" : "Generate document set"}</button>
+        <button onClick={submit} disabled={busy} className={btn}>{busy ? "Saving…" : editing ? "Save changes" : "Generate document set"}</button>
       </div>
     </div>
+  );
+}
+
+/* The shipment's three documents as printed pages, one page each. Drawn from
+   shipmentModel() — the same reading the Excel workbook uses — so the tax
+   invoice, commercial invoice and packing list cannot disagree with each
+   other or with the workbook. The browser's "Save as PDF" makes the file.  */
+function DocHead({ company, title, rows }) {
+  return (
+    <React.Fragment>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <p style={{ fontSize: 18, fontWeight: "bold", margin: 0 }}>{company.name || "Das Superfoods"}</p>
+          <p className="muted" style={{ margin: "2px 0 0", maxWidth: 320 }}>{company.address}</p>
+          <p className="muted" style={{ margin: "2px 0 0" }}>
+            {[company.gstNo ? `GST ${company.gstNo}` : "", company.iecCode ? `IEC ${company.iecCode}` : ""].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <h1>{title}</h1>
+          {rows.map(([label, value], i) => (
+            <p key={label} className={i === 0 ? undefined : "muted"} style={{ margin: i === 0 ? "6px 0 0" : 0, fontWeight: i === 0 ? "bold" : "normal" }}>{label}: {value || "—"}</p>
+          ))}
+        </div>
+      </div>
+      <div className="rule" />
+    </React.Fragment>
+  );
+}
+
+function DocBlock({ title, lines }) {
+  return (
+    <div style={{ flex: 1 }}>
+      <p className="muted" style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>{title}</p>
+      {lines.map((line, i) => (
+        <p key={i} className={i === 0 ? undefined : "muted"} style={{ margin: i === 0 ? "3px 0 0" : 0, fontWeight: i === 0 ? "bold" : "normal" }}>{line}</p>
+      ))}
+    </div>
+  );
+}
+
+const transportLines = (s, withSeals) => [
+  `Port of loading: ${s.portOfLoading || "—"}`, `Incoterm: ${s.incoterm || "—"}`,
+  `Container No: ${s.containerNo || "—"}`, `Vehicle No: ${s.vehicleNo || "—"}`,
+  ...(withSeals ? [`Customs seal: ${s.customSeal || "—"}`, `Line seal: ${s.lineSeal || "—"}`] : []),
+];
+
+function PriceTable({ m, totals }) {
+  const under = [...shipmentCharges(m), ...totals];
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th style={{ width: 28 }}>#</th><th>Product</th><th style={{ width: 80 }}>HSN</th>
+          <th className="num" style={{ width: 56 }}>Boxes</th><th className="num" style={{ width: 56 }}>Units</th>
+          <th className="num" style={{ width: 96 }}>{m.intl ? "Rate" : "MRP"} / box ({m.currency})</th>
+          <th className="num" style={{ width: 104 }}>Amount ({m.currency})</th>
+        </tr>
+      </thead>
+      <tbody>
+        {m.lines.map((l) => (
+          <tr key={l.no}>
+            <td>{l.no}</td><td>{l.name}</td><td>{l.hsn}</td>
+            <td className="num">{l.boxes}</td><td className="num">{l.units}</td>
+            <td className="num">{fmtNum(l.price)}</td><td className="num">{fmtNum(l.amount)}</td>
+          </tr>
+        ))}
+        <tr>
+          <td colSpan={3} className="num"><b>Total</b></td>
+          <td className="num"><b>{m.packing.boxes}</b></td><td className="num"><b>{m.packing.units}</b></td>
+          <td></td><td className="num"><b>{fmtNum(m.subtotal)}</b></td>
+        </tr>
+        {under.map(([label, value], i) => (
+          <tr key={label}>
+            <td colSpan={6} className="num">{i === under.length - 1 ? <b>{label}</b> : label}</td>
+            <td className="num">{i === under.length - 1 ? <b>{fmtNum(value)}</b> : fmtNum(value)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function Signatory({ company }) {
+  return (
+    <div style={{ textAlign: "right" }}>
+      <p style={{ margin: 0 }}>For <b>{company.name || "Das Superfoods"}</b></p>
+      <p className="muted" style={{ margin: "44px 0 0" }}>Authorised signatory</p>
+    </div>
+  );
+}
+
+function ShipmentDocuments({ s, pi, company }) {
+  const m = shipmentModel(s, pi);
+  return (
+    <React.Fragment>
+      <div className="doc">
+        <DocHead company={company} title="Tax invoice" rows={shipmentHeader(s, m.tax.no)} />
+        <div style={{ display: "flex", gap: 32 }}>
+          <DocBlock title="Consignee" lines={[m.tax.consignee || "—"]} />
+          <DocBlock title="Shipment" lines={transportLines(s, false)} />
+        </div>
+        <PriceTable m={m} totals={taxInvoiceTotals(m)} />
+        <p style={{ marginTop: 8, fontStyle: "italic" }}>Amount in words: {amountInWords(m.tax.grandTotal, "INR")}</p>
+        <div style={{ marginTop: 40 }}><Signatory company={company} /></div>
+      </div>
+
+      <div className="doc">
+        <DocHead company={company} title="Commercial invoice" rows={shipmentHeader(s, m.commercial.no)} />
+        <div style={{ display: "flex", gap: 32 }}>
+          <DocBlock title="Buyer" lines={[s.buyerName || "—", s.buyerAddress || ""]} />
+          <DocBlock title="Consignee" lines={[m.commercial.consignee || "—"]} />
+          <DocBlock title="Shipment" lines={transportLines(s, false)} />
+        </div>
+        <PriceTable m={m} totals={commercialInvoiceTotals(m)} />
+        <p style={{ marginTop: 8, fontStyle: "italic" }}>Amount in words: {amountInWords(m.commercial.total, m.commercial.currency)}</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 28 }}>
+          <div>
+            <p style={{ margin: 0, fontWeight: "bold" }}>BANK DETAILS FOR TRANSFER</p>
+            {bankRows(company).map(([label, value], i) => (
+              <p key={label} style={{ margin: i === 0 ? "3px 0 0" : 0 }}><b>{label}:</b> {value || "—"}</p>
+            ))}
+          </div>
+          <Signatory company={company} />
+        </div>
+      </div>
+
+      <div className="doc">
+        <DocHead company={company} title="Packing list" rows={shipmentHeader(s, s.docNo)} />
+        <div style={{ display: "flex", gap: 32 }}>
+          <DocBlock title="Consignee" lines={[m.commercial.consignee || "—"]} />
+          <DocBlock title="Shipment" lines={transportLines(s, true)} />
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style={{ width: 28 }}>#</th><th>Product</th><th style={{ width: 80 }}>Batch</th>
+              <th style={{ width: 76 }}>MFG</th><th style={{ width: 76 }}>EXP</th>
+              <th className="num" style={{ width: 52 }}>Boxes</th><th className="num" style={{ width: 52 }}>Units</th>
+              <th className="num" style={{ width: 72 }}>Net kg</th><th className="num" style={{ width: 72 }}>Gross kg</th>
+            </tr>
+          </thead>
+          <tbody>
+            {m.lines.map((l) => (
+              <tr key={l.no}>
+                <td>{l.no}</td><td>{l.name}</td><td>{l.batchNo}</td><td>{l.mfgDate ? fmtDate(l.mfgDate) : ""}</td><td>{l.expDate ? fmtDate(l.expDate) : ""}</td>
+                <td className="num">{l.boxes}</td><td className="num">{l.units}</td>
+                <td className="num">{fmtNum(l.net, 3)}</td><td className="num">{fmtNum(l.gross, 3)}</td>
+              </tr>
+            ))}
+            <tr>
+              <td colSpan={5} className="num"><b>Total</b></td>
+              <td className="num"><b>{m.packing.boxes}</b></td><td className="num"><b>{m.packing.units}</b></td>
+              <td className="num"><b>{fmtNum(m.packing.net, 3)}</b></td><td className="num"><b>{fmtNum(m.packing.gross, 3)}</b></td>
+            </tr>
+            <tr>
+              <td colSpan={7} className="num">Tonnes</td>
+              <td className="num">{fmtNum(m.packing.net / 1000, 3)}</td><td className="num">{fmtNum(m.packing.gross / 1000, 3)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{ marginTop: 40 }}><Signatory company={company} /></div>
+      </div>
+    </React.Fragment>
   );
 }
 
@@ -2000,27 +2181,71 @@ function ShipmentsPage() {
   const [formDraft, setFormDraft] = useState(null);   // the draft the open form was started from
   const [confirmDraftId, setConfirmDraftId] = useState(null);
   const [detailId, setDetailId] = useState(null);
+  const [editingId, setEditingId] = useState(null);   // the shipment being edited, if any
+  const [downloadId, setDownloadId] = useState(null);
+  const [printing, setPrinting] = useState(null);     // { s, pi } while the set is being printed
   const [saveError, setSaveError] = useState("");
   const [notice, setNotice] = useState("");
 
   const openPis = store.pis.filter((p) => !p.linkedFinalInvoiceId);
-  const pi = formPiId ? store.pis.find((p) => p.id === formPiId) : null;
+  const editing = editingId ? store.finalInvoices.find((f) => f.id === editingId) || null : null;
+  // If the shipment being edited has gone, the form goes with it rather than
+  // turning into a new shipment against a proforma that is already invoiced.
+  const pi = formPiId && !(editingId && !editing) ? store.pis.find((p) => p.id === formPiId) : null;
+  // A shipment's documents and its edit both need the proforma it was raised
+  // against: that is where the pricing basis and the currency live.
+  const piOf = (fi) => store.pis.find((p) => p.id === fi.piId) || null;
+  const noProforma = (fi) => `The proforma ${fi.piNo} this shipment was raised against could not be loaded, so this cannot be done here.`;
+  const closeForm = () => { setFormPiId(null); setEditingId(null); };
+  const openEdit = (fi) => {
+    setNotice(""); setDownloadId(null);
+    if (!piOf(fi)) { setSaveError(noProforma(fi)); return; }
+    setSaveError(""); setFormDraft(null); setEditingId(fi.id); setFormPiId(fi.piId);
+    window.scrollTo(0, 0);
+  };
+
+  // Download → PDF: the three documents are drawn into the print portal and
+  // the browser's "Save as PDF" makes the file, named after the shipment.
+  useEffect(() => {
+    if (!printing) return undefined;
+    const title = document.title;
+    const t = setTimeout(() => {
+      document.title = `Shipment ${fileSafe(printing.s.docNo)}`;
+      window.print();
+      document.title = title;
+      setPrinting(null);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [printing]);
+
+  // Download → Excel: the same three documents, one sheet each.
+  const download = async (fi, kind) => {
+    setDownloadId(null); setNotice("");
+    const itsPi = piOf(fi);
+    if (!itsPi) { setSaveError(noProforma(fi)); return; }
+    setSaveError("");
+    if (kind === "pdf") { setPrinting({ s: fi, pi: itsPi }); return; }
+    setSaveError(await attempt(() => exportBook(
+      `Shipment-${fileSafe(fi.docNo)}`, shipmentSheets(fi, itsPi, shipmentCompany(fi.company, store.company)))));
+  };
   const detail = detailId ? store.finalInvoices.find((f) => f.id === detailId) : null;
   // At most one live shipment draft per proforma (db/012).
   const draftFor = (piId) => store.drafts.find((d) => d.kind === "shipment" && d.refId === piId) || null;
-  const openForm = (p) => { setSaveError(""); setNotice(""); setFormDraft(draftFor(p.id)); setFormPiId(p.id); };
+  const openForm = (p) => { setSaveError(""); setNotice(""); setEditingId(null); setFormDraft(draftFor(p.id)); setFormPiId(p.id); };
 
   // Invoice number, shipment row and "proforma is now invoiced" are one
   // transaction — and so is retiring the draft, when there is one.
   const createShipment = async (payload) => {
-    const from = formDraft || draftFor(payload.piId);
+    const was = editing;
+    const from = was ? null : formDraft || draftFor(payload.piId);
     const message = await attempt(async () => {
       if (from) await call("raise_from_draft", { p_draft: from.id, p: pick(payload, SHIPMENT_KEYS) });
-      else await call("create_shipment", { p: pick(payload, SHIPMENT_KEYS) });
+      // One function invoices and edits: an id in the payload makes it an edit.
+      else await call("save_shipment", { p: pick(payload, SHIPMENT_KEYS) });
       await refresh();
     });
     setSaveError(message);
-    if (!message) setFormPiId(null);
+    if (!message) { closeForm(); if (was) setNotice(`Shipment ${was.docNo} updated.`); }
   };
 
   const saveDraft = async ({ title, refId, payload }) => {
@@ -2110,8 +2335,8 @@ function ShipmentsPage() {
         </div>
       )}
 
-      {pi && <ShipmentForm key={pi.id + (formDraft ? formDraft.id : "")} pi={pi} draft={formDraft} error={saveError}
-        onCancel={() => setFormPiId(null)} onSave={createShipment} onSaveDraft={saveDraft} />}
+      {pi && <ShipmentForm key={pi.id + (formDraft ? formDraft.id : "") + (editing ? editing.id : "")} pi={pi} draft={formDraft} editing={editing} error={saveError}
+        onCancel={closeForm} onSave={createShipment} onSaveDraft={editing ? undefined : saveDraft} />}
 
       <div className="mb-3 flex justify-end">
         <ExcelButton name="shipments" columns={excelColumns} rows={store.finalInvoices} />
@@ -2123,7 +2348,7 @@ function ShipmentsPage() {
               <th className={th}>Invoice</th><th className={th}>Date</th><th className={th}>Buyer</th><th className={th}>Against</th>
               <th className={th + " text-right"}>Boxes / units</th>
               <th className={th + " text-right"}>Grand total (INR)</th>
-              <th className={th + " text-right"}>Net / gross kg</th><th></th>
+              <th className={th + " text-right"}>Net / gross kg</th><th className={th + " text-right"}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -2136,11 +2361,26 @@ function ShipmentsPage() {
                 <td className={tdNum}>{fi.packingList.totalBoxes} / {fi.packingList.totalPacks}</td>
                 <td className={tdNum}>{fmtMoney(fi.taxInvoice.grandTotal, "INR")}</td>
                 <td className={tdNum + " text-[var(--muted)]"}>{fmtNum(fi.packingList.netWeight)} / {fmtNum(fi.packingList.grossWeight)}</td>
-                <td className={td + " text-right"}>
-                  <button onClick={() => setDetailId(detailId === fi.id ? null : fi.id)} className="text-xs text-[var(--accent)]"
-                    aria-expanded={detailId === fi.id}>
-                    {detailId === fi.id ? "Hide" : "View set"}
-                  </button>
+                <td className={td + " whitespace-nowrap text-right"}>
+                  {downloadId === fi.id ? (
+                    <span className="flex items-center justify-end gap-3">
+                      <button onClick={() => download(fi, "pdf")} className="text-xs text-[var(--accent)]">PDF</button>
+                      <button onClick={() => download(fi, "excel")} className="text-xs text-[var(--accent)]">Excel</button>
+                      <button onClick={() => setDownloadId(null)} aria-label="Close download options"><X className="h-3.5 w-3.5 text-[var(--muted)]" /></button>
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-end gap-4">
+                      <button onClick={() => setDetailId(detailId === fi.id ? null : fi.id)} className="text-xs text-[var(--accent)]"
+                        aria-expanded={detailId === fi.id}>
+                        {detailId === fi.id ? "Hide" : "View set"}
+                      </button>
+                      <button aria-label={`Edit ${fi.docNo}`} onClick={() => openEdit(fi)} className="text-xs text-[var(--accent)]">Edit</button>
+                      <button onClick={() => setDownloadId(fi.id)} aria-label={`Download ${fi.docNo}`}
+                        className="inline-flex items-center gap-1 text-xs text-[var(--accent)]">
+                        <Download className="h-3 w-3" /> Download
+                      </button>
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -2183,6 +2423,12 @@ function ShipmentsPage() {
             Bank details as they stood when this set was generated: {detail.company && detail.company.bankName ? `${detail.company.bankName}, A/C ${detail.company.accountNo}` : "not recorded"}.
           </p>
         </div>
+      )}
+
+      {printing && (
+        <PrintDocument>
+          <ShipmentDocuments s={printing.s} pi={printing.pi} company={shipmentCompany(printing.s.company, store.company)} />
+        </PrintDocument>
       )}
     </div>
   );
@@ -2581,6 +2827,6 @@ export default App;
 // Exported for tests/render.test.jsx, which draws every screen against sample data.
 export {
   AppCtx, SignIn, Overview, PartiesPage, PartyForm, QuotationsPage, QuotationForm, QuotationDocument, ProformaDocument,
-  ProformaPage, ProformaForm, ShipmentsPage, ShipmentForm, AnalyticsPage, CompanyPage, UsersPage,
+  ProformaPage, ProformaForm, ShipmentsPage, ShipmentForm, ShipmentDocuments, AnalyticsPage, CompanyPage, UsersPage,
   ChangePasswordDialog, CommandPalette,
 };

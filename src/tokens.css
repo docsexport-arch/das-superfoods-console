@@ -120,4 +120,6 @@ html, body {
 #print-portal .doc th { background: var(--print-fill); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 #print-portal .doc .num { text-align: right; font-variant-numeric: tabular-nums; }
 #print-portal .doc .muted { color: var(--print-muted); }
+/* A shipment prints three documents; each starts on its own page. */
+#print-portal .doc + .doc { break-before: page; page-break-before: always; }
 #print-portal .doc .rule { border-bottom: 2px solid var(--print-ink); margin: 10px 0 14px; }

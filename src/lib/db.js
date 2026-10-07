@@ -165,6 +165,7 @@ export const shipmentFromRow = (r) => ({
   taxInvoice: r.tax_invoice || {}, commercialInvoice: r.commercial_invoice || {},
   packingList: r.packing_list || {}, company: r.company_snapshot || {},
   items: r.items || [],
+  updatedAt: r.updated_at,
 });
 
 export const companyFromRow = (r) => ({

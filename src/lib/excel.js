@@ -33,6 +33,18 @@ export async function exportRows(fileName, sheetName, rows, widths = []) {
   XLSX.writeFile(book, `${fileName}.xlsx`);
 }
 
+// Several laid-out sheets in one workbook: sheets = [{ name, rows, widths }].
+export async function exportBook(fileName, sheets) {
+  const XLSX = await import("xlsx");
+  const book = XLSX.utils.book_new();
+  for (const { name, rows, widths = [] } of sheets) {
+    const sheet = XLSX.utils.aoa_to_sheet(defangRows(rows));
+    sheet["!cols"] = widths.map((wch) => ({ wch }));
+    XLSX.utils.book_append_sheet(book, sheet, name.slice(0, 31));
+  }
+  XLSX.writeFile(book, `${fileName}.xlsx`);
+}
+
 // SheetJS is loaded on demand: it is large, and only an export needs it.
 export async function exportExcel(name, columns, rows) {
   const XLSX = await import("xlsx");

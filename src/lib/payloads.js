@@ -26,7 +26,7 @@ export const PROFORMA_KEYS = [
   "buyerOrderDate", "additionalDetails", "taxRate", "items",
 ];
 export const SHIPMENT_KEYS = [
-  "piId", "items", "freight", "otherAdj", "otherReason", "gstPercent", "roundOff",
+  "id", "expectedUpdatedAt", "piId", "items", "freight", "otherAdj", "otherReason", "gstPercent", "roundOff",
   "exchangeRate", "commercialCurrency", "commercialConsignee", "taxConsignee",
   "containerNo", "vehicleNo", "customSeal", "lineSeal", "portOfLoading", "incoterm",
 ];
@@ -43,7 +43,7 @@ export const RPC_CONTRACT = {
   save_party: [...PARTY_KEYS, ...PARTY_PRODUCT_KEYS, ...ALT_BUYER_KEYS],
   save_quotation: QUOTATION_KEYS,
   save_proforma: PROFORMA_KEYS,
-  create_shipment: SHIPMENT_KEYS,
+  save_shipment: SHIPMENT_KEYS,
   save_company: COMPANY_KEYS,
   set_user_access: USER_ACCESS_KEYS,
   save_draft: DRAFT_KEYS,
