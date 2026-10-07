@@ -5,13 +5,14 @@ import React, { useState, useEffect, useRef, useCallback, useContext, createCont
 import { createPortal } from "react-dom";
 import {
   Lock, Plus, X, ChevronRight, Check, Trash2, Boxes, KeyRound, History,
-  Download, TriangleAlert, Search, Sun, Moon,
+  Download, TriangleAlert, Search, Sun, Moon, ArrowLeft,
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
 import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, partyNames, withTimeout, humanise } from "./lib/db.js";
 import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, WEIGHT_UNITS, weightUnitOf, kgFromWeight, weightFromKg, conditionsFromText, conditionsToText, shelfLifeText, SHELF_LIFE_UNITS } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
+import { useRoute } from "./lib/route.js";
 import { exportRows, exportBook } from "./lib/excel.js";
 import {
   shipmentModel, shipmentCompany, shipmentHeader, shipmentCharges, taxInvoiceTotals, commercialInvoiceTotals, bankRows, shipmentSheets,
@@ -239,7 +240,12 @@ function App() {
   const [store, setStore] = useState(emptyStore);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [active, setActive] = useState("overview");
+  // Which page is showing lives in the address bar and the browser's history
+  // (lib/route.js), so Back — the console's and the browser's — returns to the
+  // page that was open before, and a reload stays where it was.
+  const { route, navigate, goBack, canGoBack } = useRoute("overview");
+  const active = route.section;
+  const setActive = (section) => navigate(section);
   const [theme, setTheme] = useState(() => { try { return window.localStorage.getItem(THEME_KEY) || "dark"; } catch (e) { return "dark"; } });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -386,7 +392,7 @@ function App() {
   const sections = SECTIONS.filter((s) => allowed(s.key));
   const current = sections.find((s) => s.key === active) || sections[0];
   const drift = can.isAdmin && !loadError ? computeMigrationDrift(store.migrationIds) : { inSync: true };
-  const ctx = { store, refresh, user, can: allowed, isAdmin: can.isAdmin, loading };
+  const ctx = { store, refresh, user, can: allowed, isAdmin: can.isAdmin, loading, route, navigate };
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -440,6 +446,16 @@ function App() {
               <span><span className="font-medium">Database and console are out of step.</span> {describeDrift(drift)}</span>
             </div>
           )}
+
+          {/* Back, top left of every page. It is offered only while there is an
+              earlier page of this console to return to, so it never leaves the console. */}
+          <div className="mb-5">
+            <button onClick={goBack} disabled={!canGoBack} aria-label="Back to the previous page"
+              title={canGoBack ? "Back to the previous page" : "This is the first page you opened — there is nothing to go back to"}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--muted)] hover:border-[var(--muted)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--line)] disabled:hover:text-[var(--muted)]">
+              <ArrowLeft className="h-4 w-4" /> Back
+            </button>
+          </div>
 
           {loadError ? <ErrorPanel message={loadError} onRetry={refresh} /> : (
             <React.Fragment>
@@ -754,8 +770,14 @@ const PARTY_KINDS = [["international", "International"], ["domestic", "Private l
    party on file, under International and Private label / India, each with
    Edit and Delete. The list is kept off the creation screen on purpose.    */
 function PartiesPage({ initialView = "create" }) {
-  const { store, refresh } = useApp();
-  const [view, setView] = useState(initialView);        // "create" | "list"
+  const { store, refresh, route, navigate } = useApp();
+  // "create" | "list". Inside the console the two screens are places in the
+  // address bar (#/parties and #/parties/list), so Back moves between them.
+  // Drawn on its own — as the tests do — it keeps the choice itself.
+  const routed = typeof navigate === "function" && Boolean(route);
+  const [localView, setLocalView] = useState(initialView);
+  const view = routed ? (route.view === "list" ? "list" : "create") : localView;
+  const setView = (next) => (routed ? navigate("parties", next === "list" ? "list" : "") : setLocalView(next));
   const [tab, setTab] = useState("international");      // the kind of party being created
   const [formKey, setFormKey] = useState(0);            // a new number gives a clean creation form
   const [formDraft, setFormDraft] = useState(null);     // the draft the creation form was started from, if any
@@ -773,6 +795,15 @@ function PartiesPage({ initialView = "create" }) {
 
   const editing = store.parties.find((p) => p.id === editingId);
   const show = (next) => { setSaveError(""); setNotice(""); setEditingId(null); setConfirmId(null); setView(next); };
+  // Arriving at a screen by Back or Forward starts it as clean as arriving by a
+  // button: no half-open edit, no confirmation waiting, no message from the
+  // other screen.
+  const arrivedAt = useRef(view);
+  useEffect(() => {
+    if (arrivedAt.current === view) return;
+    arrivedAt.current = view;
+    setEditingId(null); setConfirmId(null); setSaveError(""); setNotice("");
+  }, [view]);
 
   // Created from a draft, the party and the draft's retirement are one
   // transaction; otherwise it is an ordinary save.
