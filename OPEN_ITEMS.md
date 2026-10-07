@@ -21,8 +21,8 @@ a green build.
 ## Owed by the build
 
 **At promotion**
-- [ ] Apply `db/pending/017_lockdown_direct_writes.sql` once the RPC-only client
-      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 17 in the same
+- [ ] Apply `db/pending/018_lockdown_direct_writes.sql` once the RPC-only client
+      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 18 in the same
       commit. Until then the tables still accept direct writes from a signed-in
       user who has the grant.
 - [ ] Then drop the three legacy columns (`access_documents`, `access_parties`,

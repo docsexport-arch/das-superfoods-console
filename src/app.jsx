@@ -586,19 +586,25 @@ function ProductRows({ products, setProducts, mode }) {
   );
 }
 
-function PartyForm({ tab, initial, onSave, onCancel, closable = true, cancelLabel = "Cancel" }) {
+function PartyForm({ tab, initial, draft, onSave, onSaveDraft, onCancel, closable = true, cancelLabel = "Cancel" }) {
   const isEdit = Boolean(initial);
-  const [f, setF] = useState(() => initial || {
+  // Continuing a draft (db/017): the form starts exactly as it was left — the
+  // boxes, the product rows with their weights in grams, the list of conditions.
+  const left = draft && draft.payload && typeof draft.payload === "object" ? draft.payload : null;
+  const blank = {
     type: tab, buyerName: "", buyerAddress: "", consigneeName: "", consigneeAddress: "",
     country: tab === "domestic" ? "India" : "", currency: tab === "domestic" ? "INR" : "USD",
     shipmentTerm: "", paymentTerm: "", conditions: "", portOfLoading: "", destinationPort: "",
     consigneeOptions: [], altBuyers: [],
-  });
-  const [products, setProducts] = useState(() => (initial ? initial.products : [])
-    .map((p) => ({ ...p, netWtG: gramsFromKg(p.netWt), grossWtG: gramsFromKg(p.grossWt) })));
+  };
+  const [f, setF] = useState(() => initial || (left && left.f && typeof left.f === "object" ? { ...blank, ...left.f, type: tab } : blank));
+  const [products, setProducts] = useState(() => (left && Array.isArray(left.products)
+    ? left.products
+    : (initial ? initial.products : []).map((p) => ({ ...p, netWtG: gramsFromKg(p.netWt), grossWtG: gramsFromKg(p.grossWt) }))));
   // Conditions are edited as a list and saved as one text, a condition per
   // line. There is always at least one box to type into.
   const [conditions, setConditions] = useState(() => {
+    if (left && Array.isArray(left.conditions) && left.conditions.length) return left.conditions;
     const list = conditionsFromText(initial ? initial.conditions : "");
     return list.length ? list : [""];
   });
@@ -616,7 +622,8 @@ function PartyForm({ tab, initial, onSave, onCancel, closable = true, cancelLabe
     <div className={card + " mb-6 p-6"}>
       <div className="mb-5 flex items-start justify-between">
         <div>
-          <p className="font-display text-lg">{isEdit ? "Edit" : "New"} {tab === "international" ? "international" : "private-label"} party</p>
+          <p className="font-display text-lg">{isEdit ? "Edit" : draft ? "Draft" : "New"} {tab === "international" ? "international" : "private-label"} party</p>
+          {draft && <p className="mt-1 text-xs text-[var(--muted)]">Continuing the draft saved by {draft.savedBy || "—"} · {fmtWhen(draft.updatedAt)}</p>}
           <p className="mt-1 text-xs text-[var(--muted)]">
             Editing later only affects future documents — anything already issued keeps the values it was created with. Changes land in the audit log.
           </p>
@@ -680,6 +687,13 @@ function PartyForm({ tab, initial, onSave, onCancel, closable = true, cancelLabe
       <ProductRows products={products} setProducts={setProducts} mode={tab} />
       <div className="mt-5 flex justify-end gap-3">
         <button onClick={onCancel} className={btnGhost}>{cancelLabel}</button>
+        {/* A draft is the form as it stands — half-filled is fine. Nothing is checked until the party is created. */}
+        {onSaveDraft && (
+          <button className={btnGhost} onClick={() => onSaveDraft({
+            title: [String(f.buyerName || "").trim() || "Untitled party", tab === "international" ? "International" : "Private label / India"].join(" · "),
+            payload: { tab, f, products, conditions },
+          })}>Save draft</button>
+        )}
         <button
           onClick={() => {
             const consigneeOptions = Array.from(new Set([...(f.consigneeOptions || []), f.consigneeName].filter(Boolean)));
@@ -709,13 +723,65 @@ function PartiesPage({ initialView = "create" }) {
   const [view, setView] = useState(initialView);        // "create" | "list"
   const [tab, setTab] = useState("international");      // the kind of party being created
   const [formKey, setFormKey] = useState(0);            // a new number gives a clean creation form
+  const [formDraft, setFormDraft] = useState(null);     // the draft the creation form was started from, if any
+  // Parties that are not created yet. They are the only thing listed on the
+  // creation screen; a created party moves to View or Edit party (decisions/019).
+  const partyDrafts = store.drafts.filter((d) => d.kind === "party");
+  const freshForm = () => { setFormDraft(null); setFormKey((k) => k + 1); };
   const [editingId, setEditingId] = useState(null);
   const [confirmId, setConfirmId] = useState(null);
   const [saveError, setSaveError] = useState("");
-  const [notice, setNotice] = useState("");
+  // What just happened, and whether it ends with the way to the list — only
+  // "a party was created" does.
+  const [notice, setNoticeState] = useState({ text: "", toList: false });
+  const setNotice = (text, toList = false) => setNoticeState({ text, toList });
 
   const editing = store.parties.find((p) => p.id === editingId);
   const show = (next) => { setSaveError(""); setNotice(""); setEditingId(null); setConfirmId(null); setView(next); };
+
+  // Created from a draft, the party and the draft's retirement are one
+  // transaction; otherwise it is an ordinary save.
+  const createParty = async (p) => {
+    const products = (p.products || [])
+      .filter((x) => String(x.name || "").trim() !== "")
+      .map((x) => pick(x, PARTY_PRODUCT_KEYS));
+    const message = await attempt(async () => {
+      const body = { ...pick(p, PARTY_KEYS), products };
+      if (formDraft) await call("raise_from_draft", { p_draft: formDraft.id, p: body });
+      else await call("save_party", { p: body });
+      await refresh();
+    });
+    setSaveError(message);
+    return message === "";
+  };
+
+  const saveDraft = async ({ title, payload }) => {
+    const message = await attempt(async () => {
+      await call("save_draft", { p: pick({
+        kind: "party", title, payload,
+        id: formDraft ? formDraft.id : undefined, expectedUpdatedAt: formDraft ? formDraft.updatedAt : undefined,
+      }, DRAFT_KEYS) });
+      await refresh();
+    });
+    setSaveError(message);
+    if (!message) { freshForm(); setNotice("Draft saved. It is listed below under Draft parties — it is not a party yet."); window.scrollTo(0, 0); }
+  };
+
+  const discardDraft = async (d) => {
+    const message = await attempt(async () => {
+      await call("delete_draft", { p_id: d.id });
+      await refresh();
+    });
+    setSaveError(message);
+    if (!message) { if (formDraft && formDraft.id === d.id) freshForm(); setNotice("Draft discarded."); }
+  };
+
+  const resumeDraft = (d) => {
+    setSaveError(""); setNotice("");
+    setTab(d.payload && d.payload.tab === "domestic" ? "domestic" : "international");
+    setFormDraft(d); setFormKey((k) => k + 1);
+    window.scrollTo(0, 0);
+  };
 
   // One call: the party and its product lines are saved in a single transaction.
   const saveParty = async (p) => {
@@ -786,10 +852,10 @@ function PartiesPage({ initialView = "create" }) {
 
       <div aria-live="polite">
         {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
-        {notice && !saveError && (
+        {notice.text && !saveError && (
           <p className="mb-4 text-sm text-[var(--status-ok)]">
-            {notice}
-            {view === "create" && <button onClick={() => show("list")} className="ml-2 underline">View or Edit party</button>}
+            {notice.text}
+            {notice.toList && <React.Fragment> <button onClick={() => show("list")} className="underline">View or Edit party</button>.</React.Fragment>}
           </p>
         )}
       </div>
@@ -798,16 +864,21 @@ function PartiesPage({ initialView = "create" }) {
         <React.Fragment>
           <div className="mb-5 flex gap-1 self-start rounded-lg border border-[var(--line)] p-1" style={{ width: "fit-content" }}>
             {PARTY_KINDS.map(([k, l]) => (
-              <button key={k} onClick={() => { setTab(k); setSaveError(""); setNotice(""); }} aria-pressed={tab === k}
+              <button key={k} onClick={() => { setTab(k); setFormDraft(null); setSaveError(""); setNotice(""); }} aria-pressed={tab === k}
                 className={`rounded-md px-3 py-1.5 text-sm ${tab === k ? "bg-[var(--field)] text-[var(--text)]" : "text-[var(--muted)]"}`}>{l}</button>
             ))}
           </div>
           {/* The form is the page here: always open, cleared rather than closed. */}
-          <PartyForm key={tab + formKey} tab={tab} closable={false} cancelLabel="Clear form"
-            onCancel={() => { setSaveError(""); setNotice(""); setFormKey(formKey + 1); }}
+          <PartyForm key={tab + formKey} tab={tab} draft={formDraft} closable={false} cancelLabel="Clear form"
+            onCancel={() => { setSaveError(""); setNotice(""); freshForm(); }}
+            onSaveDraft={saveDraft}
             onSave={async (p) => {
-              if (await saveParty(p)) { setNotice(`${p.buyerName} was created.`); setFormKey(formKey + 1); window.scrollTo(0, 0); }
+              if (await createParty(p)) { setNotice(`${p.buyerName} was created. It is now under`, true); freshForm(); window.scrollTo(0, 0); }
             }} />
+          {/* Only what is NOT a party yet is listed here. */}
+          <DraftList drafts={partyDrafts.filter((d) => !formDraft || d.id !== formDraft.id)} onResume={resumeDraft} onDiscard={discardDraft}
+            title="Draft parties"
+            note="Saved part-way and not created yet. Anyone with access to Parties can continue one. Once a party is created it leaves this list and appears under View or Edit party." />
         </React.Fragment>
       )}
 
@@ -1244,15 +1315,14 @@ function QuotationsPage() {
 /* -------------------------------------------------------------- drafts */
 /* A draft is a form saved part-way (db/012): no number, nothing issued.
    Anyone who holds the section can continue or discard one.               */
-function DraftList({ drafts, onResume, onDiscard }) {
+function DraftList({ drafts, onResume, onDiscard, title = "Saved drafts",
+  note = "Not issued yet — a number is only taken when the document is created. Anyone with access to this section can continue a draft." }) {
   const [confirmId, setConfirmId] = useState(null);
   if (!drafts.length) return null;
   return (
     <div className={card + " mb-6 p-5"}>
-      <p className="mb-1 text-sm font-medium">Saved drafts</p>
-      <p className="mb-4 text-xs text-[var(--muted)]">
-        Not issued yet — a number is only taken when the document is created. Anyone with access to this section can continue a draft.
-      </p>
+      <p className="mb-1 text-sm font-medium">{title}</p>
+      <p className="mb-4 text-xs text-[var(--muted)]">{note}</p>
       <div className="space-y-2">
         {drafts.map((d) => (
           <div key={d.id} className={panel + " flex items-center justify-between gap-4 px-4 py-3"}>

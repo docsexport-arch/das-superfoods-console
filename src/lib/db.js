@@ -252,9 +252,10 @@ export async function fetchStore(profile) {
     jobs.push(readAll("proformas", { order: NEWEST_FIRST, liveOnly: true })
       .then((rows) => { out.pis = rows.map(proformaFromRow); }));
   }
-  // Drafts are read by the same two grants; row-level security returns only
-  // the kind each grant covers.
-  if (can.proforma || can.shipments) {
+  // Drafts are read by whoever holds a section that has them — parties,
+  // proforma or shipments; row-level security returns only the kinds each
+  // grant covers (db/012, db/017).
+  if (can.parties || can.proforma || can.shipments) {
     jobs.push(readAll("drafts", { order: [["updated_at", false], ["id", true]], liveOnly: true })
       .then((rows) => { out.drafts = rows.map(draftFromRow); }));
   }
