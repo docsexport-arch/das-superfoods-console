@@ -586,7 +586,7 @@ function ProductRows({ products, setProducts, mode }) {
   );
 }
 
-function PartyForm({ tab, initial, onSave, onCancel }) {
+function PartyForm({ tab, initial, onSave, onCancel, closable = true, cancelLabel = "Cancel" }) {
   const isEdit = Boolean(initial);
   const [f, setF] = useState(() => initial || {
     type: tab, buyerName: "", buyerAddress: "", consigneeName: "", consigneeAddress: "",
@@ -621,7 +621,7 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
             Editing later only affects future documents — anything already issued keeps the values it was created with. Changes land in the audit log.
           </p>
         </div>
-        <button onClick={onCancel}><X className="h-4 w-4 text-[var(--muted)]" /></button>
+        {closable && <button onClick={onCancel} aria-label="Close"><X className="h-4 w-4 text-[var(--muted)]" /></button>}
       </div>
       <div className="mb-5 grid gap-4 md:grid-cols-3">
         <Field label="Buyer name"><input className={input} value={f.buyerName} onChange={(e) => set("buyerName", e.target.value)} /></Field>
@@ -679,7 +679,7 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
       <p className="mb-2 text-sm font-medium">Products</p>
       <ProductRows products={products} setProducts={setProducts} mode={tab} />
       <div className="mt-5 flex justify-end gap-3">
-        <button onClick={onCancel} className={btnGhost}>Cancel</button>
+        <button onClick={onCancel} className={btnGhost}>{cancelLabel}</button>
         <button
           onClick={() => {
             const consigneeOptions = Array.from(new Set([...(f.consigneeOptions || []), f.consigneeName].filter(Boolean)));
@@ -698,16 +698,24 @@ function PartyForm({ tab, initial, onSave, onCancel }) {
 }
 
 
-function PartiesPage() {
+const PARTY_KINDS = [["international", "International"], ["domestic", "Private label / India"]];
+
+/* Two views of one page (decisions/018). "create" is party creation: the form,
+   open, for the kind of party picked. "list" is View or Edit party: every
+   party on file, under International and Private label / India, each with
+   Edit and Delete. The list is kept off the creation screen on purpose.    */
+function PartiesPage({ initialView = "create" }) {
   const { store, refresh } = useApp();
-  const [tab, setTab] = useState("international");
-  const [showForm, setShowForm] = useState(false);
+  const [view, setView] = useState(initialView);        // "create" | "list"
+  const [tab, setTab] = useState("international");      // the kind of party being created
+  const [formKey, setFormKey] = useState(0);            // a new number gives a clean creation form
   const [editingId, setEditingId] = useState(null);
   const [confirmId, setConfirmId] = useState(null);
   const [saveError, setSaveError] = useState("");
+  const [notice, setNotice] = useState("");
 
-  const filtered = store.parties.filter((p) => p.type === tab);
   const editing = store.parties.find((p) => p.id === editingId);
+  const show = (next) => { setSaveError(""); setNotice(""); setEditingId(null); setConfirmId(null); setView(next); };
 
   // One call: the party and its product lines are saved in a single transaction.
   const saveParty = async (p) => {
@@ -728,7 +736,7 @@ function PartiesPage() {
       await refresh();
     });
     setSaveError(message);
-    if (!message) setConfirmId(null);
+    if (!message) { setConfirmId(null); setNotice(`${p.buyerName} was removed from the list.`); }
   };
 
   // The price list, one row per product — the shape that is useful in Excel.
@@ -750,83 +758,126 @@ function PartiesPage() {
     { label: "Gross kg / box", value: (r) => (r.prod ? r.prod.grossWt : "") },
   ];
 
+  const count = store.parties.length;
+
   return (
     <div>
-      <PageHead title="Parties" blurb="Buyer, ship-to, terms and per-product pricing. Everything downstream reads from here." />
-
-      <div className="mb-5 flex items-center justify-between">
-        <div className="flex gap-1 rounded-lg border border-[var(--line)] p-1">
-          {[["international", "International"], ["domestic", "Private label / India"]].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)} aria-pressed={tab === k}
-              className={`rounded-md px-3 py-1.5 text-sm ${tab === k ? "bg-[var(--field)] text-[var(--text)]" : "text-[var(--muted)]"}`}>{l}</button>
-          ))}
-        </div>
-        <div className="flex items-center gap-3">
-          <ExcelButton name="party-price-list" columns={excelColumns} rows={priceList} />
-          <button onClick={() => { setEditingId(null); setShowForm(true); }} className={btn + " flex items-center gap-1.5"}>
-            <Plus className="h-4 w-4" /> Add party
-          </button>
+      <div className="flex items-start justify-between gap-6">
+        <PageHead title={view === "create" ? "Parties" : "View or edit parties"}
+          blurb={view === "create"
+            ? "Create a party: buyer, consignee or ship-to, terms and per-product pricing. Everything downstream reads from here."
+            : "Every party on file, international and private label. Edit one, or remove it from the list."} />
+        <div className="flex shrink-0 items-center gap-3 pt-1">
+          {view === "create" ? (
+            <button onClick={() => show("list")} className={btn + " flex items-center gap-2"}>
+              View or Edit party
+              <span className="rounded-md bg-[var(--accent-ink)]/15 px-1.5 text-xs font-num tabular-nums" aria-label={`${count} on file`}>{count}</span>
+            </button>
+          ) : (
+            <React.Fragment>
+              <ExcelButton name="party-price-list" columns={excelColumns} rows={priceList} />
+              <button onClick={() => show("create")} className={btn + " flex items-center gap-1.5"}>
+                <Plus className="h-4 w-4" /> Add party
+              </button>
+            </React.Fragment>
+          )}
         </div>
       </div>
 
-      <div aria-live="polite">{saveError && <p className={errText + " mb-4"}>{saveError}</p>}</div>
+      <div aria-live="polite">
+        {saveError && <p className={errText + " mb-4"}>{saveError}</p>}
+        {notice && !saveError && (
+          <p className="mb-4 text-sm text-[var(--status-ok)]">
+            {notice}
+            {view === "create" && <button onClick={() => show("list")} className="ml-2 underline">View or Edit party</button>}
+          </p>
+        )}
+      </div>
 
-      {showForm && <PartyForm tab={tab} onCancel={() => setShowForm(false)} onSave={async (p) => {
-        if (await saveParty(p)) setShowForm(false);
-      }} />}
-
-      {editing && <PartyForm tab={editing.type} initial={editing} onCancel={() => setEditingId(null)} onSave={async (u) => {
-        if (await saveParty(u)) setEditingId(null);
-      }} />}
-
-      <div className={card + " overflow-hidden"}>
-        <table className="w-full">
-          <thead className="bg-[var(--panel)]">
-            <tr>
-              <th className={th}>Buyer</th><th className={th}>Country</th><th className={th}>Currency</th>
-              <th className={th}>Products</th><th className={th}>Payment term</th><th className={th + " text-right"}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((p) => (
-              <tr key={p.id} className="border-t border-[var(--line)]">
-                <td className={td + " font-medium"}>
-                  {p.buyerName}
-                  {(p.altBuyers || []).length > 0 && (
-                    <span className="block text-xs font-normal text-[var(--muted)]">Other names: {p.altBuyers.map((b) => b.name).join(" · ")}</span>
-                  )}
-                </td>
-                <td className={td + " text-[var(--muted)]"}>{p.country}</td>
-                <td className={td}>{p.currency}</td>
-                <td className={td + " font-num tabular-nums"}>{p.products.length}</td>
-                <td className={td + " text-[var(--muted)]"}>{p.paymentTerm}</td>
-                <td className={td + " text-right"}>
-                  {confirmId === p.id ? (
-                    <span className="flex items-center justify-end gap-3">
-                      <span className="text-xs text-[var(--status-danger)]">Retire {p.buyerName}?</span>
-                      <button onClick={() => deleteParty(p)} className="text-xs text-[var(--status-danger)]">Confirm</button>
-                      <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--muted)]">Cancel</button>
-                    </span>
-                  ) : (
-                    <span className="flex items-center justify-end gap-4">
-                      <button onClick={() => { setShowForm(false); setEditingId(p.id); }} className="text-xs text-[var(--accent)]">Edit</button>
-                      <button onClick={() => setConfirmId(p.id)} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Delete</button>
-                    </span>
-                  )}
-                </td>
-              </tr>
+      {view === "create" && (
+        <React.Fragment>
+          <div className="mb-5 flex gap-1 self-start rounded-lg border border-[var(--line)] p-1" style={{ width: "fit-content" }}>
+            {PARTY_KINDS.map(([k, l]) => (
+              <button key={k} onClick={() => { setTab(k); setSaveError(""); setNotice(""); }} aria-pressed={tab === k}
+                className={`rounded-md px-3 py-1.5 text-sm ${tab === k ? "bg-[var(--field)] text-[var(--text)]" : "text-[var(--muted)]"}`}>{l}</button>
             ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--muted)]">
-                No parties in this category yet — use “Add party” to create the first one.
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-3 text-xs text-[var(--faint)]">
-        Deleting retires a party from the lists; the record and its history stay in the database, and documents already issued are unaffected.
-      </p>
+          </div>
+          {/* The form is the page here: always open, cleared rather than closed. */}
+          <PartyForm key={tab + formKey} tab={tab} closable={false} cancelLabel="Clear form"
+            onCancel={() => { setSaveError(""); setNotice(""); setFormKey(formKey + 1); }}
+            onSave={async (p) => {
+              if (await saveParty(p)) { setNotice(`${p.buyerName} was created.`); setFormKey(formKey + 1); window.scrollTo(0, 0); }
+            }} />
+        </React.Fragment>
+      )}
+
+      {view === "list" && (
+        <React.Fragment>
+          {editing && <PartyForm key={editing.id} tab={editing.type} initial={editing} onCancel={() => setEditingId(null)} onSave={async (u) => {
+            if (await saveParty(u)) { setEditingId(null); setNotice(`${u.buyerName} was updated.`); }
+          }} />}
+
+          {PARTY_KINDS.map(([kind, title]) => {
+            const rows = store.parties.filter((p) => p.type === kind);
+            return (
+              <section key={kind} className="mb-8" aria-label={title}>
+                <p className="mb-3 flex items-baseline gap-2 font-display text-lg">
+                  {title} <span className="font-num text-xs text-[var(--muted)]">{rows.length}</span>
+                </p>
+                <div className={card + " overflow-hidden"}>
+                  <table className="w-full">
+                    <thead className="bg-[var(--panel)]">
+                      <tr>
+                        <th className={th}>Buyer</th><th className={th}>Country</th><th className={th}>Currency</th>
+                        <th className={th}>Products</th><th className={th}>Payment term</th><th className={th + " text-right"}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((p) => (
+                        <tr key={p.id} className="border-t border-[var(--line)]">
+                          <td className={td + " font-medium"}>
+                            {p.buyerName}
+                            {(p.altBuyers || []).length > 0 && (
+                              <span className="block text-xs font-normal text-[var(--muted)]">Other names: {p.altBuyers.map((b) => b.name).join(" · ")}</span>
+                            )}
+                          </td>
+                          <td className={td + " text-[var(--muted)]"}>{p.country}</td>
+                          <td className={td}>{p.currency}</td>
+                          <td className={td + " font-num tabular-nums"}>{p.products.length}</td>
+                          <td className={td + " text-[var(--muted)]"}>{p.paymentTerm}</td>
+                          <td className={td + " text-right"}>
+                            {confirmId === p.id ? (
+                              <span className="flex items-center justify-end gap-3">
+                                <span className="text-xs text-[var(--status-danger)]">Retire {p.buyerName}?</span>
+                                <button onClick={() => deleteParty(p)} className="text-xs text-[var(--status-danger)]">Confirm</button>
+                                <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--muted)]">Cancel</button>
+                              </span>
+                            ) : (
+                              <span className="flex items-center justify-end gap-4">
+                                <button aria-label={`Edit ${p.buyerName}`} className="text-xs text-[var(--accent)]"
+                                  onClick={() => { setSaveError(""); setNotice(""); setEditingId(p.id); window.scrollTo(0, 0); }}>Edit</button>
+                                <button aria-label={`Delete ${p.buyerName}`} onClick={() => setConfirmId(p.id)} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Delete</button>
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {rows.length === 0 && (
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                          No {kind === "international" ? "international" : "private-label"} parties yet — use “Add party” to create the first one.
+                        </td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            );
+          })}
+          <p className="text-xs text-[var(--faint)]">
+            Deleting retires a party from the lists; the record and its history stay in the database, and documents already issued are unaffected.
+          </p>
+        </React.Fragment>
+      )}
     </div>
   );
 }

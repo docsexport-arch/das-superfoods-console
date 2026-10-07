@@ -76,8 +76,8 @@ describe("every screen renders", () => {
   });
 
   it("parties — list, Excel, add and edit forms", () => {
-    expect(draw(<PartiesPage />)).toContain("Al Rawabi General Trading LLC");
-    expect(draw(<PartiesPage />)).toContain("Excel");
+    expect(draw(<PartiesPage initialView="list" />)).toContain("Al Rawabi General Trading LLC");
+    expect(draw(<PartiesPage initialView="list" />)).toContain("Excel");
     expect(draw(<PartyForm tab="international" onSave={() => {}} onCancel={() => {}} />)).toContain("Buyer name");
     expect(draw(<PartyForm tab="international" initial={party} onSave={() => {}} onCancel={() => {}} />)).toContain("Peanut Butter Creamy 340g");
   });
@@ -151,7 +151,7 @@ describe("every screen renders", () => {
 describe("an empty database renders too, with an empty state that says what to do", () => {
   it("every list page", () => {
     const empty = () => ({ ...emptyStore(), users: [admin] });
-    expect(draw(<PartiesPage />, admin, empty())).toContain("Add party");
+    expect(draw(<PartiesPage initialView="list" />, admin, empty())).toContain("Add party");
     expect(draw(<QuotationsPage />, admin, empty())).toContain("starts the first one");
     expect(draw(<ProformaPage />, admin, empty())).toContain("No open proforma invoices");
     expect(draw(<ShipmentsPage />, admin, empty())).toContain("raise one under Proforma first");

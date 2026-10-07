@@ -120,7 +120,7 @@ describe("the screens", () => {
   });
 
   it("party list — shows the other names under the main one, only where there are any", () => {
-    const html = draw(<PartiesPage />, [party, single]);
+    const html = draw(<PartiesPage initialView="list" />, [party, single]);
     expect(html).toContain("Rawabi Foods FZCO · Rawabi Retail LLC");
     expect(html.match(/Other names:/g)).toHaveLength(1);
   });
