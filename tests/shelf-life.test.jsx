@@ -34,11 +34,8 @@ const draw = (node) => renderToString(
   <AppCtx.Provider value={{ store: { ...emptyStore(), users: [admin] }, user: admin, loading: false, refresh: async () => {}, isAdmin: true, can: () => true }}>
     {node}
   </AppCtx.Provider>).replace(/<!-- -->/g, "");
-// One table row per product, so a value can be tied to the product it sits beside.
-const rowsOf = (html) => {
-  const body = html.slice(html.indexOf("<tbody>"), html.indexOf("</tbody>"));
-  return body.split("<tr").slice(1);
-};
+// One card per product, so a value can be tied to the product it sits beside.
+const rowsOf = (html) => html.split('role="group" aria-label="Product ').slice(1);
 const lifeOf = (row) => ({
   length: (/aria-label="Shelf life"[^>]*value="([^"]*)"/.exec(row) || [])[1],
   unit: (/aria-label="Shelf life in months or years"[\s\S]*?<option value="(months|years)" selected="">/.exec(row) || [])[1],
@@ -81,7 +78,7 @@ describe("the product rows on the party form", () => {
   for (const [tab, label] of [["international", "international"], ["domestic", "private-label / India"]]) {
     it(`a ${label} party has a Shelf life column, with months or years to choose`, () => {
       const html = draw(<PartyForm tab={tab} initial={partyOf(tab, three)} onSave={() => {}} onCancel={() => {}} />);
-      expect(html).toMatch(/<th[^>]*>Shelf life<\/th>/);
+      expect(html).toMatch(/<span[^>]*>Shelf life<\/span>/);
       const rows = rowsOf(html);
       expect(rows).toHaveLength(3);
       for (const row of rows) {

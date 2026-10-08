@@ -38,7 +38,8 @@ const draw = (node) => renderToString(
   <AppCtx.Provider value={{ store: { ...emptyStore(), users: [admin] }, user: admin, loading: false, refresh: async () => {}, isAdmin: true, can: () => true }}>
     {node}
   </AppCtx.Provider>).replace(/<!-- -->/g, "");
-const rowsOf = (html) => html.slice(html.indexOf("<tbody>"), html.indexOf("</tbody>")).split("<tr").slice(1);
+// One card per product, so a value can be tied to the product it sits beside.
+const rowsOf = (html) => html.split('role="group" aria-label="Product ').slice(1);
 const weightsOf = (row) => ({
   net: (/aria-label="Net weight per box"[^>]*value="([^"]*)"/.exec(row) || [])[1],
   gross: (/aria-label="Gross weight per box"[^>]*value="([^"]*)"/.exec(row) || [])[1],
@@ -105,7 +106,7 @@ describe("the product rows on the party form", () => {
   for (const tab of ["international", "domestic"]) {
     it(`a ${tab === "domestic" ? "private-label / India" : "international"} party has a Weight unit choice on every line`, () => {
       const html = draw(<PartyForm tab={tab} initial={partyOf(tab, three)} onSave={() => {}} onCancel={() => {}} />);
-      for (const h of ["Net wt / box", "Gross wt / box", "Box wt unit"]) expect(html).toMatch(new RegExp(`<th[^>]*>${h}</th>`));
+      for (const h of ["Net wt / box", "Gross wt / box", "Box wt unit"]) expect(html).toMatch(new RegExp(`<span[^>]*>${h}</span>`));
       // The column no longer claims grams.
       expect(html).not.toContain("Net wt / box (g)");
       const rows = rowsOf(html);

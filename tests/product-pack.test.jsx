@@ -37,8 +37,10 @@ const draw = (node, parties = []) => renderToString(
   <AppCtx.Provider value={{ store: { ...emptyStore(), parties, users: [admin] }, user: admin, loading: false, refresh: async () => {}, isAdmin: true, can: () => true }}>
     {node}
   </AppCtx.Provider>).replace(/<!-- -->/g, "");
-const productTable = (html) => html.slice(html.lastIndexOf("<table", html.indexOf('aria-label="Product name"')), html.indexOf("</table>", html.indexOf('aria-label="Product name"')));
-const rowsOf = (html) => { const t = productTable(html); return t.slice(t.indexOf("<tbody>"), t.indexOf("</tbody>")).split("<tr").slice(1); };
+// One card per product, so a value can be tied to the product it sits beside.
+const rowsOf = (html) => html.split('role="group" aria-label="Product ').slice(1);
+// The visible labels inside one card, in the order they are laid out.
+const labelsIn = (card) => [...card.matchAll(/<span class="[^"]*\bmb-2\b[^"]*">([^<]*)<\/span>/g)].map((m) => m[1]);
 const packOf = (row) => ({
   name: (/aria-label="Product name"[^>]*value="([^"]*)"/.exec(row) || [])[1],
   weight: (/aria-label="Weight of one piece"[^>]*value="([^"]*)"/.exec(row) || [])[1],
@@ -99,11 +101,10 @@ describe("telling two packs of one product apart", () => {
 describe("the product rows on the party form", () => {
   for (const tab of ["international", "domestic"]) {
     it(`a ${tab === "domestic" ? "private-label / India" : "international"} party lists Product, Weight, Unit, Pieces per box, Secondary name — in that order`, () => {
-      const table = productTable(draw(<PartyForm tab={tab} initial={partyOf(tab)} onSave={() => {}} onCancel={() => {}} />));
-      const heads = [...table.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]);
+      const heads = labelsIn(rowsOf(draw(<PartyForm tab={tab} initial={partyOf(tab)} onSave={() => {}} onCancel={() => {}} />))[0]);
       expect(heads.slice(0, 5)).toEqual(["Product", "Weight", "Unit", "Pieces per box", "Secondary name"]);
       // Everything that was there before is still there, after them.
-      expect(heads.slice(5)).toEqual(["HSN", tab === "international" ? "Rate / box" : "MRP / box", "Net wt / box", "Gross wt / box", "Box wt unit", "Shelf life", ""]);
+      expect(heads.slice(5)).toEqual(["HSN", tab === "international" ? "Rate / box" : "MRP / box", "Net wt / box", "Gross wt / box", "Box wt unit", "Shelf life"]);
       expect(heads).not.toContain("Packs / box");
     });
   }

@@ -570,64 +570,86 @@ function ProductRows({ products, setProducts, mode }) {
   // piece and its unit (packWtIn / packWeightUnit), pieces per box, and a
   // secondary name that says it in the desk's own words (decisions/023).
   const add = () => setProducts([...products, { id: tempId(), name: "", secondaryName: "", packWtIn: "", packWeightUnit: "g", hsn: "", rate: 0, mrp: 0, netWtIn: 0, grossWtIn: 0, weightUnit: "g", packsPerBox: 1, weightPerPackG: 0, shelfLife: "", shelfLifeUnit: "months" }]);
+  const priceLabel = mode === "international" ? "Rate / box" : "MRP / box";
+  // One card per product, its boxes laid out over three lines so each has room
+  // (decisions/024). The order is the desk's own: the product, then its pack —
+  // weight of one piece, unit, pieces per box, secondary name — then the rest.
   return (
-    <div className={panel + " overflow-x-auto"}>
-      <table className="w-full">
-        <thead>
-          <tr>
-            <th className={th}>Product</th><th className={th}>Weight</th><th className={th}>Unit</th>
-            <th className={th}>Pieces per box</th><th className={th}>Secondary name</th><th className={th}>HSN</th>
-            <th className={th}>{mode === "international" ? "Rate / box" : "MRP / box"}</th>
-            <th className={th}>Net wt / box</th><th className={th}>Gross wt / box</th><th className={th}>Box wt unit</th>
-            <th className={th}>Shelf life</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {products.map((p) => (
-            <tr key={p.id} className="border-t border-[var(--line)]">
-              <td className="px-2 py-1.5"><input aria-label="Product name" className={input + " min-w-[14rem]"} value={p.name} onChange={(e) => update(p.id, "name", e.target.value)} /></td>
-              {/* The pack: weight of one piece and its unit, pieces per box, and a name that says it. */}
-              <td className="px-2 py-1.5"><input type="number" step="any" min="0" aria-label="Weight of one piece" className={input + " min-w-[5.5rem]"} value={p.packWtIn ?? ""} onChange={(e) => update(p.id, "packWtIn", e.target.value)} /></td>
-              <td className="px-2 py-1.5">
-                <select aria-label="Unit for the weight of one piece" className={input + " min-w-[5rem]"} value={weightUnitOf(p.packWeightUnit)} onChange={(e) => update(p.id, "packWeightUnit", e.target.value)}>
+    <div>
+      {products.length === 0 && (
+        <p className={panel + " px-4 py-6 text-center text-xs text-[var(--muted)]"}>No products yet — add the first one below.</p>
+      )}
+      <div className="space-y-3">
+        {products.map((p, i) => (
+          <div key={p.id} role="group" aria-label={`Product ${i + 1}`} className={panel + " p-4"}>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]">Product {i + 1}</p>
+              <button type="button" aria-label={`Remove product ${i + 1}`} onClick={() => setProducts(products.filter((x) => x.id !== p.id))}
+                className="flex items-center gap-1.5 text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">
+                <Trash2 className="h-4 w-4" /> Remove
+              </button>
+            </div>
+            <div className="grid gap-x-4 gap-y-4 md:grid-cols-12">
+              {/* line 1 — the product and its pack */}
+              <Field label="Product" className="md:col-span-5">
+                <input aria-label="Product name" className={input} value={p.name} onChange={(e) => update(p.id, "name", e.target.value)} />
+              </Field>
+              <Field label="Weight" hint="Of one piece" className="md:col-span-2">
+                <input type="number" step="any" min="0" aria-label="Weight of one piece" className={input} value={p.packWtIn ?? ""} onChange={(e) => update(p.id, "packWtIn", e.target.value)} />
+              </Field>
+              <Field label="Unit" className="md:col-span-2">
+                <select aria-label="Unit for the weight of one piece" className={input} value={weightUnitOf(p.packWeightUnit)} onChange={(e) => update(p.id, "packWeightUnit", e.target.value)}>
                   {WEIGHT_UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
                 </select>
-              </td>
-              <td className="px-2 py-1.5"><input type="number" min="0" aria-label="Pieces per box" className={input + " min-w-[5.5rem]"} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} /></td>
-              <td className="px-2 py-1.5"><input aria-label="Secondary name" className={input + " min-w-[14rem]"} value={p.secondaryName || ""} onChange={(e) => update(p.id, "secondaryName", e.target.value)} /></td>
-              <td className="px-2 py-1.5"><input aria-label="HSN" className={input + " min-w-[6.5rem]"} value={p.hsn} onChange={(e) => update(p.id, "hsn", e.target.value)} /></td>
-              <td className="px-2 py-1.5">
+              </Field>
+              <Field label="Pieces per box" className="md:col-span-3">
+                <input type="number" min="0" aria-label="Pieces per box" className={input} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} />
+              </Field>
+
+              {/* line 2 — its second name, code and price */}
+              <Field label="Secondary name" className="md:col-span-5">
+                <input aria-label="Secondary name" className={input} value={p.secondaryName || ""} onChange={(e) => update(p.id, "secondaryName", e.target.value)} />
+              </Field>
+              <Field label="HSN" className="md:col-span-3">
+                <input aria-label="HSN" className={input} value={p.hsn} onChange={(e) => update(p.id, "hsn", e.target.value)} />
+              </Field>
+              <Field label={priceLabel} className="md:col-span-4">
                 {mode === "international"
-                  ? <input type="number" step="0.01" className={input} value={p.rate} onChange={(e) => update(p.id, "rate", e.target.value)} />
-                  : <input type="number" step="0.01" className={input} value={p.mrp} onChange={(e) => update(p.id, "mrp", e.target.value)} />}
-              </td>
-              <td className="px-2 py-1.5"><input type="number" step="any" min="0" aria-label="Net weight per box" className={input} value={p.netWtIn} onChange={(e) => update(p.id, "netWtIn", e.target.value)} /></td>
-              <td className="px-2 py-1.5"><input type="number" step="any" min="0" aria-label="Gross weight per box" className={input} value={p.grossWtIn} onChange={(e) => update(p.id, "grossWtIn", e.target.value)} /></td>
-              <td className="px-2 py-1.5">
-                <select aria-label="Box weight unit" className={input + " min-w-[5rem]"} value={weightUnitOf(p.weightUnit)} onChange={(e) => update(p.id, "weightUnit", e.target.value)}>
+                  ? <input type="number" step="0.01" aria-label="Rate per box" className={input} value={p.rate} onChange={(e) => update(p.id, "rate", e.target.value)} />
+                  : <input type="number" step="0.01" aria-label="MRP per box" className={input} value={p.mrp} onChange={(e) => update(p.id, "mrp", e.target.value)} />}
+              </Field>
+
+              {/* line 3 — the box, and how long it keeps */}
+              <Field label="Net wt / box" className="md:col-span-3">
+                <input type="number" step="any" min="0" aria-label="Net weight per box" className={input} value={p.netWtIn} onChange={(e) => update(p.id, "netWtIn", e.target.value)} />
+              </Field>
+              <Field label="Gross wt / box" className="md:col-span-3">
+                <input type="number" step="any" min="0" aria-label="Gross weight per box" className={input} value={p.grossWtIn} onChange={(e) => update(p.id, "grossWtIn", e.target.value)} />
+              </Field>
+              <Field label="Box wt unit" className="md:col-span-2">
+                <select aria-label="Box weight unit" className={input} value={weightUnitOf(p.weightUnit)} onChange={(e) => update(p.id, "weightUnit", e.target.value)}>
                   {WEIGHT_UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
                 </select>
-              </td>
+              </Field>
               {/* Each product has its own shelf life: a length, and whether that is months or years. */}
-              <td className="px-2 py-1.5">
-                <span className="flex min-w-[11rem] gap-2">
-                  <input type="number" min="0" step="1" aria-label="Shelf life" className={input + " w-20"} value={toNumber(p.shelfLife) > 0 || p.shelfLife === "" ? p.shelfLife : ""}
+              <div className="md:col-span-4">
+                <span className={label}>Shelf life</span>
+                <span className="flex gap-2">
+                  <input type="number" min="0" step="1" aria-label="Shelf life" className={input} value={toNumber(p.shelfLife) > 0 || p.shelfLife === "" ? p.shelfLife : ""}
                     onChange={(e) => update(p.id, "shelfLife", e.target.value)} />
                   <select aria-label="Shelf life in months or years" className={input} value={p.shelfLifeUnit === "years" ? "years" : "months"}
                     onChange={(e) => update(p.id, "shelfLifeUnit", e.target.value)}>
                     {SHELF_LIFE_UNITS.map((u) => <option key={u} value={u}>{u === "years" ? "Years" : "Months"}</option>)}
                   </select>
                 </span>
-              </td>
-              <td className="px-2">
-                <button onClick={() => setProducts(products.filter((x) => x.id !== p.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" /></button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <button onClick={add} className="flex w-full items-center justify-center gap-1 border-t border-[var(--line)] py-2.5 text-xs text-[var(--accent)]">
-        <Plus className="h-3.5 w-3.5" /> Add product line
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button type="button" onClick={add}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--line)] py-3 text-sm text-[var(--accent)] hover:border-[var(--accent)]">
+        <Plus className="h-4 w-4" /> Add product line
       </button>
     </div>
   );
