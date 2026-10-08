@@ -148,6 +148,26 @@ export const weightUnitOf = (unit) => (Object.prototype.hasOwnProperty.call(KG_P
 export const kgFromWeight = (value, unit) => tidyWeight(toNumber(value) * KG_PER_UNIT[weightUnitOf(unit)]);
 export const weightFromKg = (kg, unit) => tidyWeight(toNumber(kg) / KG_PER_UNIT[weightUnitOf(unit)]);
 
+// The weight of ONE piece (db/020) follows the same idea with a different
+// store: it is kept in GRAMS whatever unit it was typed in, with the unit
+// beside it — so "1 kg" is stored as 1000 g and reads back as 1 kg.
+export const gramsFromWeight = (value, unit) => tidyWeight(kgFromWeight(value, unit) * 1000);
+export const weightFromGrams = (grams, unit) => weightFromKg(toNumber(grams) / 1000, unit);
+// "400 g", "1 kg". Nothing given says nothing.
+export function packWeightText(grams, unit) {
+  const n = weightFromGrams(grams, unit);
+  if (!(n > 0)) return "";
+  return `${n} ${WEIGHT_UNITS.find((u) => u.key === weightUnitOf(unit)).label}`;
+}
+// What tells two lines of the same product apart: the secondary name if the
+// line has one, otherwise its pack in words ("400 g × 20").
+export function packLabel(product) {
+  const secondary = String((product && product.secondaryName) || "").trim();
+  if (secondary) return secondary;
+  const weight = packWeightText(product && product.weightPerPackG, product && product.packWeightUnit);
+  return weight ? `${weight} × ${toNumber(product.packsPerBox)}` : "";
+}
+
 // A product's shelf life is a length and a unit, kept as typed — "2 years" is
 // not turned into 24 months. Nothing given reads as nothing, not "0 months".
 export const SHELF_LIFE_UNITS = ["months", "years"];

@@ -42,7 +42,7 @@ const rowsOf = (html) => html.slice(html.indexOf("<tbody>"), html.indexOf("</tbo
 const weightsOf = (row) => ({
   net: (/aria-label="Net weight per box"[^>]*value="([^"]*)"/.exec(row) || [])[1],
   gross: (/aria-label="Gross weight per box"[^>]*value="([^"]*)"/.exec(row) || [])[1],
-  unit: (/aria-label="Weight unit"[\s\S]*?<option value="(g|kg|mt)" selected="">/.exec(row) || [])[1],
+  unit: (/aria-label="Box weight unit"[\s\S]*?<option value="(g|kg|mt)" selected="">/.exec(row) || [])[1],
 });
 
 describe("grams, kilograms and MT", () => {
@@ -105,13 +105,13 @@ describe("the product rows on the party form", () => {
   for (const tab of ["international", "domestic"]) {
     it(`a ${tab === "domestic" ? "private-label / India" : "international"} party has a Weight unit choice on every line`, () => {
       const html = draw(<PartyForm tab={tab} initial={partyOf(tab, three)} onSave={() => {}} onCancel={() => {}} />);
-      for (const h of ["Net wt / box", "Gross wt / box", "Weight unit"]) expect(html).toMatch(new RegExp(`<th[^>]*>${h}</th>`));
+      for (const h of ["Net wt / box", "Gross wt / box", "Box wt unit"]) expect(html).toMatch(new RegExp(`<th[^>]*>${h}</th>`));
       // The column no longer claims grams.
       expect(html).not.toContain("Net wt / box (g)");
       const rows = rowsOf(html);
       expect(rows).toHaveLength(4);
       for (const row of rows) {
-        const options = [...row.slice(row.indexOf('aria-label="Weight unit"')).matchAll(/<option value="(g|kg|mt)"[^>]*>([^<]*)<\/option>/g)].slice(0, 3).map((m) => m[2]);
+        const options = [...row.slice(row.indexOf('aria-label="Box weight unit"')).matchAll(/<option value="(g|kg|mt)"[^>]*>([^<]*)<\/option>/g)].slice(0, 3).map((m) => m[2]);
         expect(options).toEqual(["g", "kg", "MT"]);
       }
     });

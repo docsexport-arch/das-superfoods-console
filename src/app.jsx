@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
 import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, partyNames, withTimeout, humanise } from "./lib/db.js";
-import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, WEIGHT_UNITS, weightUnitOf, kgFromWeight, weightFromKg, conditionsFromText, conditionsToText, shelfLifeText, SHELF_LIFE_UNITS } from "./lib/format.js";
+import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, WEIGHT_UNITS, weightUnitOf, kgFromWeight, weightFromKg, conditionsFromText, conditionsToText, shelfLifeText, SHELF_LIFE_UNITS, gramsFromWeight, weightFromGrams, packWeightText, packLabel } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
 import { useRoute } from "./lib/route.js";
@@ -565,23 +565,37 @@ function ProductRows({ products, setProducts, mode }) {
   // with weightUnit: g, kg or MT); the party form turns them into the kilograms
   // that are stored when it saves. Changing the unit changes what the typed
   // number means — it does not convert the number, exactly as with shelf life.
-  const add = () => setProducts([...products, { id: tempId(), name: "", hsn: "", rate: 0, mrp: 0, netWtIn: 0, grossWtIn: 0, weightUnit: "g", packsPerBox: 1, weightPerPackG: 0, shelfLife: "", shelfLifeUnit: "months" }]);
+  // The same product can be listed more than once, in different packs. The
+  // name stays the same; the pack is described beside it: the weight of one
+  // piece and its unit (packWtIn / packWeightUnit), pieces per box, and a
+  // secondary name that says it in the desk's own words (decisions/023).
+  const add = () => setProducts([...products, { id: tempId(), name: "", secondaryName: "", packWtIn: "", packWeightUnit: "g", hsn: "", rate: 0, mrp: 0, netWtIn: 0, grossWtIn: 0, weightUnit: "g", packsPerBox: 1, weightPerPackG: 0, shelfLife: "", shelfLifeUnit: "months" }]);
   return (
     <div className={panel + " overflow-x-auto"}>
       <table className="w-full">
         <thead>
           <tr>
-            <th className={th}>Product</th><th className={th}>HSN</th>
+            <th className={th}>Product</th><th className={th}>Weight</th><th className={th}>Unit</th>
+            <th className={th}>Pieces per box</th><th className={th}>Secondary name</th><th className={th}>HSN</th>
             <th className={th}>{mode === "international" ? "Rate / box" : "MRP / box"}</th>
-            <th className={th}>Net wt / box</th><th className={th}>Gross wt / box</th><th className={th}>Weight unit</th>
-            <th className={th}>Packs / box</th><th className={th}>Shelf life</th><th></th>
+            <th className={th}>Net wt / box</th><th className={th}>Gross wt / box</th><th className={th}>Box wt unit</th>
+            <th className={th}>Shelf life</th><th></th>
           </tr>
         </thead>
         <tbody>
           {products.map((p) => (
             <tr key={p.id} className="border-t border-[var(--line)]">
-              <td className="px-2 py-1.5"><input className={input} value={p.name} onChange={(e) => update(p.id, "name", e.target.value)} /></td>
-              <td className="px-2 py-1.5"><input className={input} value={p.hsn} onChange={(e) => update(p.id, "hsn", e.target.value)} /></td>
+              <td className="px-2 py-1.5"><input aria-label="Product name" className={input + " min-w-[14rem]"} value={p.name} onChange={(e) => update(p.id, "name", e.target.value)} /></td>
+              {/* The pack: weight of one piece and its unit, pieces per box, and a name that says it. */}
+              <td className="px-2 py-1.5"><input type="number" step="any" min="0" aria-label="Weight of one piece" className={input + " min-w-[5.5rem]"} value={p.packWtIn ?? ""} onChange={(e) => update(p.id, "packWtIn", e.target.value)} /></td>
+              <td className="px-2 py-1.5">
+                <select aria-label="Unit for the weight of one piece" className={input + " min-w-[5rem]"} value={weightUnitOf(p.packWeightUnit)} onChange={(e) => update(p.id, "packWeightUnit", e.target.value)}>
+                  {WEIGHT_UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
+                </select>
+              </td>
+              <td className="px-2 py-1.5"><input type="number" min="0" aria-label="Pieces per box" className={input + " min-w-[5.5rem]"} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} /></td>
+              <td className="px-2 py-1.5"><input aria-label="Secondary name" className={input + " min-w-[14rem]"} value={p.secondaryName || ""} onChange={(e) => update(p.id, "secondaryName", e.target.value)} /></td>
+              <td className="px-2 py-1.5"><input aria-label="HSN" className={input + " min-w-[6.5rem]"} value={p.hsn} onChange={(e) => update(p.id, "hsn", e.target.value)} /></td>
               <td className="px-2 py-1.5">
                 {mode === "international"
                   ? <input type="number" step="0.01" className={input} value={p.rate} onChange={(e) => update(p.id, "rate", e.target.value)} />
@@ -590,11 +604,10 @@ function ProductRows({ products, setProducts, mode }) {
               <td className="px-2 py-1.5"><input type="number" step="any" min="0" aria-label="Net weight per box" className={input} value={p.netWtIn} onChange={(e) => update(p.id, "netWtIn", e.target.value)} /></td>
               <td className="px-2 py-1.5"><input type="number" step="any" min="0" aria-label="Gross weight per box" className={input} value={p.grossWtIn} onChange={(e) => update(p.id, "grossWtIn", e.target.value)} /></td>
               <td className="px-2 py-1.5">
-                <select aria-label="Weight unit" className={input + " min-w-[5rem]"} value={weightUnitOf(p.weightUnit)} onChange={(e) => update(p.id, "weightUnit", e.target.value)}>
+                <select aria-label="Box weight unit" className={input + " min-w-[5rem]"} value={weightUnitOf(p.weightUnit)} onChange={(e) => update(p.id, "weightUnit", e.target.value)}>
                   {WEIGHT_UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
                 </select>
               </td>
-              <td className="px-2 py-1.5"><input type="number" aria-label="Packs per box" className={input} value={p.packsPerBox} onChange={(e) => update(p.id, "packsPerBox", e.target.value)} /></td>
               {/* Each product has its own shelf life: a length, and whether that is months or years. */}
               <td className="px-2 py-1.5">
                 <span className="flex min-w-[11rem] gap-2">
@@ -625,6 +638,16 @@ function ProductRows({ products, setProducts, mode }) {
    number is shown back the way it was entered. A draft holds the row as it was
    left; one saved before units existed holds grams (netWtG / grossWtG).     */
 function productFormRow(p) {
+  const row = boxWeightRow(p);
+  // The weight of one piece, as typed. A saved party gives grams plus the unit
+  // it was typed in; a line with none shows an empty box, not a zero.
+  const unit = weightUnitOf(row.packWeightUnit);
+  if (row.packWtIn !== undefined) return { ...row, packWeightUnit: unit };
+  const typed = weightFromGrams(row.weightPerPackG, unit);
+  return { ...row, packWeightUnit: unit, packWtIn: typed > 0 ? typed : "" };
+}
+
+function boxWeightRow(p) {
   if (p.netWtIn !== undefined || p.grossWtIn !== undefined) return { ...p, weightUnit: weightUnitOf(p.weightUnit) };
   if (p.netWtG !== undefined || p.grossWtG !== undefined) {
     const { netWtG, grossWtG, ...rest } = p;
@@ -746,9 +769,12 @@ function PartyForm({ tab, initial, draft, onSave, onSaveDraft, onCancel, closabl
           onClick={() => {
             const consigneeOptions = Array.from(new Set([...(f.consigneeOptions || []), f.consigneeName].filter(Boolean)));
             // Typed per box in the line's own unit; stored in kilograms per box, with the unit beside it.
-            const lines = products.map(({ netWtIn, grossWtIn, ...p }) => ({
+            const lines = products.map(({ netWtIn, grossWtIn, packWtIn, ...p }) => ({
               ...p, weightUnit: weightUnitOf(p.weightUnit),
               netWt: kgFromWeight(netWtIn, p.weightUnit), grossWt: kgFromWeight(grossWtIn, p.weightUnit),
+              // The weight of one piece: typed in its own unit, stored in grams, with the unit beside it.
+              packWeightUnit: weightUnitOf(p.packWeightUnit), weightPerPackG: gramsFromWeight(packWtIn, p.packWeightUnit),
+              secondaryName: String(p.secondaryName || "").trim(),
             }));
             const party = { ...f, conditions: conditionsToText(conditions), products: lines, consigneeOptions };
             onSave(isEdit ? party : { id: tempId(), ...party });
@@ -882,6 +908,8 @@ function PartiesPage({ initialView = "create" }) {
     { label: "Shipment term", value: (r) => r.p.shipmentTerm },
     { label: "Payment term", value: (r) => r.p.paymentTerm, width: 30 },
     { label: "Product", value: (r) => (r.prod ? r.prod.name : ""), width: 30 },
+    { label: "Secondary name", value: (r) => (r.prod ? r.prod.secondaryName : ""), width: 32 },
+    { label: "Weight / piece", value: (r) => (r.prod ? packWeightText(r.prod.weightPerPackG, r.prod.packWeightUnit) : "") },
     { label: "HSN", value: (r) => (r.prod ? r.prod.hsn : "") },
     { label: "Rate / box", value: (r) => (r.prod ? r.prod.rate : "") },
     { label: "MRP / box", value: (r) => (r.prod ? r.prod.mrp : "") },
@@ -1520,6 +1548,8 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
       rate: Number(p.rate) || 0, mrp: Number(p.mrp) || 0,
       netWt: Number(p.netWt) || 0, grossWt: Number(p.grossWt) || 0,
       packsPerBox: Number(p.packsPerBox) || 0, weightPerPackG: Number(p.weightPerPackG) || 0,
+      // The pack rides along too: the same product name can be on two lines.
+      secondaryName: p.secondaryName || "", packWeightUnit: weightUnitOf(p.packWeightUnit),
     }]);
   };
 
@@ -1620,7 +1650,10 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
           <tbody>
             {items.map((it) => (
               <tr key={it.id} className="border-t border-[var(--line)]">
-                <td className={td}>{it.name}</td>
+                <td className={td}>
+                  {it.name}
+                  {packLabel(it) && <span className="block text-xs text-[var(--muted)]">{packLabel(it)}</span>}
+                </td>
                 <td className={td + " font-num text-xs text-[var(--muted)]"}>{it.hsn}</td>
                 <td className={td}>{fmtNum(isIntl ? it.rate : it.mrp)}</td>
                 <td className="px-2 py-1.5 w-32"><input type="number" className={input} value={it.boxQty}
@@ -1643,7 +1676,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
         </table>
         <select className="w-full border-t border-[var(--line)] bg-transparent py-2.5 text-center text-xs text-[var(--accent)]" value="" onChange={(e) => addLine(e.target.value)}>
           <option value="">+ Add product from the party master</option>
-          {party.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {party.products.map((p) => <option key={p.id} value={p.id}>{p.name}{packLabel(p) ? ` — ${packLabel(p)}` : ""}</option>)}
         </select>
       </div>
 

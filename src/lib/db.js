@@ -99,6 +99,10 @@ export const partyFromRow = (r, products) => ({
     // The unit this line's weights were typed in (db/019); netWt and grossWt
     // themselves are always kilograms. Grams on a row that predates the choice.
     weightUnit: ["g", "kg", "mt"].includes(p.weight_unit) ? p.weight_unit : "g",
+    // The pack (db/020): a second name that says it, and the unit the weight of
+    // one piece was typed in. weightPerPackG itself is always grams.
+    secondaryName: p.secondary_name || "",
+    packWeightUnit: ["g", "kg", "mt"].includes(p.pack_weight_unit) ? p.pack_weight_unit : "g",
   })),
 });
 

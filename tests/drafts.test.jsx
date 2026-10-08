@@ -82,10 +82,10 @@ describe("weights on the party form are in grams per box", () => {
     // The unit is now a choice per line (db/019, tests/weight-unit.test.jsx);
     // a line saved before that choice existed was typed in grams and stays so.
     const html = draw(<PartyForm tab="international" initial={party} onSave={() => {}} onCancel={() => {}} />);
-    for (const s of ["Net wt / box", "Gross wt / box", "Weight unit", "Packs / box"]) expect(html).toContain(s);
+    for (const s of ["Net wt / box", "Gross wt / box", "Box wt unit", "Pieces per box"]) expect(html).toContain(s);
     expect(html).toMatch(/aria-label="Net weight per box"[^>]*value="1360"/);
     expect(html).toMatch(/aria-label="Gross weight per box"[^>]*value="1520"/);
-    expect(html).toMatch(/aria-label="Weight unit"[^>]*>[\s\S]*?<option value="g" selected="">g<\/option>/);
+    expect(html).toMatch(/aria-label="Box weight unit"[^>]*>[\s\S]*?<option value="g" selected="">g<\/option>/);
     expect(html.toLowerCase()).not.toContain("g / pack");
   });
 
