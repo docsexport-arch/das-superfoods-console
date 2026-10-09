@@ -689,6 +689,7 @@ function PartyForm({ tab, initial, draft, onSave, onSaveDraft, onCancel, closabl
     country: tab === "domestic" ? "India" : "", currency: tab === "domestic" ? "INR" : "USD",
     shipmentTerm: "", paymentTerm: "", conditions: "", portOfLoading: "", destinationPort: "",
     consigneeOptions: [], altBuyers: [],
+    buyerMobile: "", buyerEmail: "", buyerTaxId: "", consigneeMobile: "", consigneeEmail: "", consigneeTaxId: "",
   };
   const [f, setF] = useState(() => initial || (left && left.f && typeof left.f === "object" ? { ...blank, ...left.f, type: tab } : blank));
   const [products, setProducts] = useState(() => (left && Array.isArray(left.products)
@@ -706,8 +707,18 @@ function PartyForm({ tab, initial, draft, onSave, onSaveDraft, onCancel, closabl
   // it is called what the desk calls it: the consignee on an export party, the
   // ship-to on a private-label one (decisions/017).
   const names = tab === "international"
-    ? { name: "Consignee", address: "Consignee address", others: "Other buyer or consignee", inHint: "the consignee" }
-    : { name: "Ship to", address: "Shipping address", others: "Other buyer and ship-to names", inHint: "the ship-to name" };
+    ? { name: "Consignee", address: "Consignee address", others: "Other buyer or consignee", inHint: "the consignee", who: "Consignee" }
+    : { name: "Ship to", address: "Shipping address", others: "Other buyer and ship-to names", inHint: "the ship-to name", who: "Ship-to" };
+  // Mobile, mail id and tax id — one set under the buyer's address, one under
+  // the consignee's / ship-to's (db/021, decisions/025). Kept as typed: a
+  // number may carry a country code, a tax id is whatever that country issues.
+  const contactBoxes = (who, keys) => [
+    ["mobile contact no.", keys[0], "tel"], ["mail id", keys[1], "email"], ["tax id", keys[2], "text"],
+  ].map(([label, key, mode]) => (
+    <Field key={key} label={`${who} ${label}`}>
+      <input className={input} inputMode={mode} value={f[key] || ""} onChange={(e) => set(key, e.target.value)} />
+    </Field>
+  ));
   const altBuyers = f.altBuyers || [];
   const setAlt = (i, k, v) => set("altBuyers", altBuyers.map((b, j) => (j === i ? { ...b, [k]: v } : b)));
 
@@ -726,8 +737,10 @@ function PartyForm({ tab, initial, draft, onSave, onSaveDraft, onCancel, closabl
       <div className="mb-5 grid gap-4 md:grid-cols-3">
         <Field label="Buyer name"><input className={input} value={f.buyerName} onChange={(e) => set("buyerName", e.target.value)} /></Field>
         <Field label="Buyer address" className="md:col-span-2"><input className={input} value={f.buyerAddress} onChange={(e) => set("buyerAddress", e.target.value)} /></Field>
+        {contactBoxes("Buyer", ["buyerMobile", "buyerEmail", "buyerTaxId"])}
         <Field label={names.name}><input className={input} value={f.consigneeName} onChange={(e) => set("consigneeName", e.target.value)} /></Field>
         <Field label={names.address} className="md:col-span-2"><input className={input} value={f.consigneeAddress} onChange={(e) => set("consigneeAddress", e.target.value)} /></Field>
+        {contactBoxes(names.who, ["consigneeMobile", "consigneeEmail", "consigneeTaxId"])}
         <Field label="Country"><input className={input} value={f.country} onChange={(e) => set("country", e.target.value)} /></Field>
         <Field label="Currency">
           <select className={input} value={f.currency} onChange={(e) => set("currency", e.target.value)}>
@@ -925,6 +938,12 @@ function PartiesPage({ initialView = "create" }) {
     { label: "Buyer", value: (r) => r.p.buyerName, width: 32 },
     { label: "Other names", value: (r) => (r.p.altBuyers || []).map((b) => (b.address ? `${b.name} — ${b.address}` : b.name)).join("; "), width: 40 },
     { label: "Type", value: (r) => r.p.type },
+    { label: "Buyer mobile", value: (r) => r.p.buyerMobile, width: 18 },
+    { label: "Buyer mail id", value: (r) => r.p.buyerEmail, width: 28 },
+    { label: "Buyer tax id", value: (r) => r.p.buyerTaxId, width: 18 },
+    { label: "Consignee / ship-to mobile", value: (r) => r.p.consigneeMobile, width: 18 },
+    { label: "Consignee / ship-to mail id", value: (r) => r.p.consigneeEmail, width: 28 },
+    { label: "Consignee / ship-to tax id", value: (r) => r.p.consigneeTaxId, width: 18 },
     { label: "Country", value: (r) => r.p.country },
     { label: "Currency", value: (r) => r.p.currency, width: 10 },
     { label: "Shipment term", value: (r) => r.p.shipmentTerm },

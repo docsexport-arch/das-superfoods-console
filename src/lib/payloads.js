@@ -9,6 +9,7 @@ export const PARTY_KEYS = [
   "id", "type", "buyerName", "buyerAddress", "consigneeName", "consigneeAddress",
   "consigneeOptions", "altBuyers", "country", "currency", "shipmentTerm", "paymentTerm",
   "conditions", "portOfLoading", "destinationPort", "products",
+  "buyerMobile", "buyerEmail", "buyerTaxId", "consigneeMobile", "consigneeEmail", "consigneeTaxId",
 ];
 // One entry of altBuyers — another name the same party orders under.
 export const ALT_BUYER_KEYS = ["name", "address"];

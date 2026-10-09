@@ -83,6 +83,9 @@ export const partyFromRow = (r, products) => ({
   id: r.id, type: r.type,
   buyerName: r.buyer_name, buyerAddress: r.buyer_address,
   consigneeName: r.consignee_name, consigneeAddress: r.consignee_address,
+  // Contact details, as typed (db/021). A party saved before they existed has none.
+  buyerMobile: r.buyer_mobile || "", buyerEmail: r.buyer_email || "", buyerTaxId: r.buyer_tax_id || "",
+  consigneeMobile: r.consignee_mobile || "", consigneeEmail: r.consignee_email || "", consigneeTaxId: r.consignee_tax_id || "",
   consigneeOptions: r.consignee_options || [],
   altBuyers: (Array.isArray(r.alt_buyers) ? r.alt_buyers : [])
     .map((b) => ({ name: (b && b.name) || "", address: (b && b.address) || "" })),
