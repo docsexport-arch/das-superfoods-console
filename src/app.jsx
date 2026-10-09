@@ -1949,6 +1949,23 @@ function ProformaPage({ initialTab = "open" }) {
     if (!message) setNotice("Draft discarded.");
   };
 
+  // Delete (db/022): asked for twice — Delete, then Confirm — on the row itself.
+  // Only an open proforma; the database refuses an invoiced one, and one with
+  // a shipment draft against it, and says why. Its number comes free.
+  const [confirmId, setConfirmId] = useState(null);
+  const remove = async (pi) => {
+    const message = await attempt(async () => {
+      await call("delete_proforma", { p_id: pi.id });
+      await refresh();
+    });
+    setSaveError(message);
+    setConfirmId(null);
+    if (!message) {
+      if (form && form.editing && form.editing.id === pi.id) setForm(null);
+      setNotice(`Proforma ${pi.docNo} was deleted. Its number can be used again.`);
+    }
+  };
+
   // Download → PDF: the document is drawn into the print portal and the
   // browser's "Save as PDF" makes the file, named after the proforma.
   const [downloadId, setDownloadId] = useState(null);
@@ -2043,6 +2060,12 @@ function ProformaPage({ initialTab = "open" }) {
                       <button onClick={() => { setDownloadId(null); downloadExcel(pi); }} className="text-xs text-[var(--accent)]">Excel</button>
                       <button onClick={() => setDownloadId(null)} aria-label="Close download options"><X className="h-3.5 w-3.5 text-[var(--muted)]" /></button>
                     </span>
+                  ) : confirmId === pi.id ? (
+                    <span className="flex items-center justify-end gap-3">
+                      <span className="text-xs text-[var(--status-danger)]">Delete {pi.docNo}?</span>
+                      <button onClick={() => remove(pi)} className="text-xs text-[var(--status-danger)]">Confirm</button>
+                      <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--muted)]">Cancel</button>
+                    </span>
                   ) : (
                     <span className="flex items-center justify-end gap-4">
                       {/* Once a shipment is invoiced against it, a proforma is a record and stays as it is. */}
@@ -2052,7 +2075,14 @@ function ProformaPage({ initialTab = "open" }) {
                           Edit
                         </button>
                       )}
-                      <button onClick={() => setDownloadId(pi.id)} aria-label={`Download ${pi.docNo}`}
+                      {/* The same rule for Delete: an invoiced proforma is kept. */}
+                      {!pi.linkedFinalInvoiceId && (
+                        <button aria-label={`Delete ${pi.docNo}`} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]"
+                          onClick={() => { setSaveError(""); setNotice(""); setConfirmId(pi.id); }}>
+                          Delete
+                        </button>
+                      )}
+                      <button onClick={() => { setConfirmId(null); setDownloadId(pi.id); }} aria-label={`Download ${pi.docNo}`}
                         className="inline-flex items-center gap-1 text-xs text-[var(--accent)]">
                         <Download className="h-3 w-3" /> Download
                       </button>

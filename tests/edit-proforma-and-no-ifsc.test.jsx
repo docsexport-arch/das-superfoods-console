@@ -146,7 +146,12 @@ describe("editing a proforma — what is sent, and what the database does with i
     expect(body.match(/round\(v_taxable \* v_rate \/ 100, 2\)/g)).toHaveLength(1);
     const defined = readdirSync(join(ROOT, "db")).filter((f) => f.endsWith(".sql"))
       .filter((f) => /^create or replace function public\.save_proforma\(/m.test(readFileSync(join(ROOT, "db", f), "utf8")));
-    expect(defined).toEqual(["014_edit_proforma_and_no_ifsc.sql"]);
+    // db/022 redefines it with one change (a deleted proforma's number is free); still one copy of the arithmetic.
+    expect(defined).toEqual(["014_edit_proforma_and_no_ifsc.sql", "022_delete_proforma.sql"]);
+    const sql022 = readFileSync(join(ROOT, "db", "022_delete_proforma.sql"), "utf8").replace(/\r\n/g, "\n");
+    const latest = new RegExp("create or replace function public\\.save_proforma\\([\\s\\S]*?\\n\\$\\$;").exec(sql022)[0];
+    expect(latest.match(/into v_boxes, v_total, v_taxable/g)).toHaveLength(1);
+    expect(latest.match(/round\(v_taxable \* v_rate \/ 100, 2\)/g)).toHaveLength(1);
   });
 
   it("the two entry points that only create cannot be turned into an edit", () => {
