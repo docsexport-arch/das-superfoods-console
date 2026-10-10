@@ -198,7 +198,7 @@ describe("the Word button on the quotations list", () => {
   const admin = { id: "u1", name: "Sai Admin", email: "docs.export@dasfoodindia.com", role: "admin", active: true, sections: [] };
   const html = renderToString(
     <AppCtx.Provider value={{ store: { ...emptyStore(), company, quotations: [exportQ, indiaQ], users: [admin] }, user: admin, loading: false, refresh: async () => {}, isAdmin: true, can: () => true }}>
-      <QuotationsPage />
+      <QuotationsPage initialView="list" />
     </AppCtx.Provider>).replace(/<!-- -->/g, "");
 
   it("every quotation has Word beside PDF, then Edit and Delete", () => {

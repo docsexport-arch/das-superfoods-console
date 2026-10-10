@@ -206,7 +206,7 @@ describe("choosing the currency on the quotation form", () => {
   });
 
   it("the list shows each quotation's value in its own currency", () => {
-    const html = draw(<QuotationsPage />);
+    const html = draw(<QuotationsPage initialView="list" />);
     expect(html).toContain(">US$ 49,999.50</td>");
     expect(html).toContain(">₹ 1,29,628.80</td>");
     expect(html).toContain(">49,999.50</td>");                         // the older one, bare

@@ -83,7 +83,7 @@ describe("every screen renders", () => {
   });
 
   it("quotations — PDF, Edit and Delete on every row, dates dd/mm/yyyy", () => {
-    const html = draw(<QuotationsPage />);
+    const html = draw(<QuotationsPage initialView="list" />);
     for (const s of ["DS-QUO-2026-0001", "PDF", "Edit", "Delete", "Excel", "03/10/2026"]) expect(html).toContain(s);
     expect(html).not.toContain("2026-10-03");
   });
@@ -152,7 +152,7 @@ describe("an empty database renders too, with an empty state that says what to d
   it("every list page", () => {
     const empty = () => ({ ...emptyStore(), users: [admin] });
     expect(draw(<PartiesPage initialView="list" />, admin, empty())).toContain("Add party");
-    expect(draw(<QuotationsPage />, admin, empty())).toContain("starts the first one");
+    expect(draw(<QuotationsPage initialView="list" />, admin, empty())).toContain("starts the first one");
     expect(draw(<ProformaPage />, admin, empty())).toContain("No open proforma invoices");
     expect(draw(<ShipmentsPage />, admin, empty())).toContain("raise one under Proforma first");
     expect(draw(<Overview onNavigate={() => {}} />, admin, empty())).toBeTruthy();

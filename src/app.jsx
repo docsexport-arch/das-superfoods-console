@@ -1174,7 +1174,7 @@ function QuotationDocument({ q, company }) {
   );
 }
 
-function QuotationForm({ initial, onCancel, onSubmit }) {
+function QuotationForm({ initial, onCancel, onSubmit, cancelLabel = "Cancel" }) {
   const { store } = useApp();
   const isEdit = Boolean(initial);
   const [partyId, setPartyId] = useState(initial ? initial.partyId || "" : "");
@@ -1344,7 +1344,7 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
         </div>
         <div className="flex items-center gap-3">
           {error && <span className={errText}>{error}</span>}
-          <button onClick={onCancel} className={btnGhost}>Cancel</button>
+          <button onClick={onCancel} className={btnGhost}>{cancelLabel}</button>
           <button onClick={submit} disabled={busy} className={btn}>
             {busy ? "Saving…" : isEdit ? "Save changes" : "Create quotation"}
           </button>
@@ -1354,15 +1354,38 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
   );
 }
 
-function QuotationsPage() {
-  const { store, refresh } = useApp();
-  const [open, setOpen] = useState(false);
+/* Two views of one page (decisions/032), as Parties has (decisions/018).
+   "create" is quotation creation: the form, open, and nothing else. "list" is
+   View or Edit quotation: every quotation made, each with PDF, Word, Edit and
+   Delete. The list is kept off the creation screen on purpose.              */
+function QuotationsPage({ initialView = "create" }) {
+  const { store, refresh, route, navigate } = useApp();
+  // Inside the console the two screens are places in the address bar
+  // (#/quotations and #/quotations/list), so Back moves between them. Drawn on
+  // its own — as the tests do — the page keeps the choice itself.
+  const routed = typeof navigate === "function" && Boolean(route);
+  const [localView, setLocalView] = useState(initialView);
+  const view = routed ? (route.view === "list" ? "list" : "create") : localView;
+  const setView = (next) => (routed ? navigate("quotations", next === "list" ? "list" : "") : setLocalView(next));
+  const [formKey, setFormKey] = useState(0);            // a new number gives a clean creation form
   const [editingId, setEditingId] = useState(null);
   const [confirmId, setConfirmId] = useState(null);
   const [printing, setPrinting] = useState(null);
   const [pageError, setPageError] = useState("");
+  // What just happened, and whether it ends with the way to the list — only
+  // "a quotation was created" does.
+  const [notice, setNoticeState] = useState({ text: "", toList: false });
+  const setNotice = (text, toList = false) => setNoticeState({ text, toList });
 
   const editing = store.quotations.find((q) => q.id === editingId);
+  const show = (next) => { setPageError(""); setNotice(""); setEditingId(null); setConfirmId(null); setView(next); };
+  // Arriving at a screen by Back or Forward starts it as clean as arriving by a button.
+  const arrivedAt = useRef(view);
+  useEffect(() => {
+    if (arrivedAt.current === view) return;
+    arrivedAt.current = view;
+    setEditingId(null); setConfirmId(null); setPageError(""); setNotice("");
+  }, [view]);
 
   useEffect(() => {
     if (!printing) return undefined;
@@ -1388,11 +1411,13 @@ function QuotationsPage() {
     if (typed && store.quotations.some((q) => q.id !== extra.id && String(q.docNo || "").trim().toUpperCase() === typed.toUpperCase())) {
       return `Quotation number ${typed} is already in use. Type a different number.`;
     }
+    // The database answers with the number the quotation was given — typed or automatic.
+    let made = null;
     const message = await attempt(async () => {
-      await call("save_quotation", { p: pick({ ...payload, ...extra, items: cleanItems(payload.items) }, QUOTATION_KEYS) });
+      made = await call("save_quotation", { p: pick({ ...payload, ...extra, items: cleanItems(payload.items) }, QUOTATION_KEYS) });
       await refresh();
     });
-    if (!message) done();
+    if (!message) done((made && made.doc_no) || typed, payload);
     return message;
   };
 
@@ -1402,7 +1427,7 @@ function QuotationsPage() {
       await refresh();
     });
     setPageError(message);
-    if (!message) setConfirmId(null);
+    if (!message) { setConfirmId(null); setNotice(`${q.docNo} was removed from the list.`); }
   };
 
   // Download → Word: the same quotation as the PDF, as a .docx that can be edited.
@@ -1424,25 +1449,59 @@ function QuotationsPage() {
     { label: "Grand total", value: (q) => q.grandTotal },
   ];
 
+  const count = store.quotations.length;
+
   return (
     <div>
-      <PageHead title="Quotations" blurb="For first-time inquiries, before a buyer is set up as a repeat party. Box rate only — no per-jar rate, and IGST applies to Indian buyers only." />
-
-      <div className="mb-5 flex items-center justify-end gap-3">
-        <ExcelButton name="quotations" columns={excelColumns} rows={store.quotations} />
-        <button onClick={() => { setEditingId(null); setOpen(!open); }} className={btn + " flex items-center gap-1.5"}>
-          <Plus className="h-4 w-4" /> New quotation
-        </button>
+      <div className="flex items-start justify-between gap-6">
+        <PageHead title={view === "create" ? "Quotations" : "View or edit quotations"}
+          blurb={view === "create"
+            ? "Create a quotation — for first-time inquiries, before a buyer is set up as a repeat party. Box rate only — no per-jar rate, and IGST applies to Indian buyers only."
+            : "Every quotation made. Download one as PDF or Word, edit it, or remove it from the list."} />
+        <div className="flex shrink-0 items-center gap-3 pt-1">
+          {view === "create" ? (
+            <button onClick={() => show("list")} className={btn + " flex items-center gap-2"}>
+              View or Edit quotation
+              <span className="rounded-md bg-[var(--accent-ink)]/15 px-1.5 text-xs font-num tabular-nums" aria-label={`${count} made`}>{count}</span>
+            </button>
+          ) : (
+            <React.Fragment>
+              <ExcelButton name="quotations" columns={excelColumns} rows={store.quotations} />
+              <button onClick={() => show("create")} className={btn + " flex items-center gap-1.5"}>
+                <Plus className="h-4 w-4" /> New quotation
+              </button>
+            </React.Fragment>
+          )}
+        </div>
       </div>
 
-      <div aria-live="polite">{pageError && <p className={errText + " mb-4"}>{pageError}</p>}</div>
+      <div aria-live="polite">
+        {pageError && <p className={errText + " mb-4"}>{pageError}</p>}
+        {notice.text && !pageError && (
+          <p className="mb-4 text-sm text-[var(--status-ok)]">
+            {notice.text}
+            {notice.toList && <React.Fragment> <button onClick={() => show("list")} className="underline">View or Edit quotation</button>.</React.Fragment>}
+          </p>
+        )}
+      </div>
 
-      {open && !editing && <QuotationForm onCancel={() => setOpen(false)} onSubmit={save({}, () => setOpen(false))} />}
-      {editing && (
-        <QuotationForm key={editing.id} initial={editing} onCancel={() => setEditingId(null)}
-          onSubmit={save({ id: editing.id, expectedUpdatedAt: editing.updatedAt }, () => setEditingId(null))} />
+      {/* The form is the page here: always open, cleared rather than closed. */}
+      {view === "create" && (
+        <QuotationForm key={formKey} cancelLabel="Clear form"
+          onCancel={() => { setPageError(""); setNotice(""); setFormKey((k) => k + 1); }}
+          onSubmit={save({}, (docNo, q) => {
+            setNotice(`Quotation ${docNo} for ${String(q.buyerName || "").trim()} was created. It is now under`, true);
+            setFormKey((k) => k + 1);
+            window.scrollTo(0, 0);
+          })} />
       )}
 
+      {view === "list" && editing && (
+        <QuotationForm key={editing.id} initial={editing} onCancel={() => setEditingId(null)}
+          onSubmit={save({ id: editing.id, expectedUpdatedAt: editing.updatedAt }, (docNo) => { setEditingId(null); setNotice(`Quotation ${docNo} was updated.`); })} />
+      )}
+
+      {view === "list" && (
       <div className={card + " overflow-hidden"}>
         <table className="w-full">
           <thead className="bg-[var(--panel)]">
@@ -1478,8 +1537,8 @@ function QuotationsPage() {
                       <button onClick={() => downloadWord(q)} aria-label={`Download ${q.docNo} as Word`} className="flex items-center gap-1 text-xs text-[var(--accent)]">
                         <Download className="h-3 w-3" /> Word
                       </button>
-                      <button onClick={() => { setOpen(false); setEditingId(q.id); }} className="text-xs text-[var(--accent)]">Edit</button>
-                      <button onClick={() => setConfirmId(q.id)} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Delete</button>
+                      <button onClick={() => { setPageError(""); setNotice(""); setEditingId(q.id); window.scrollTo(0, 0); }} aria-label={`Edit ${q.docNo}`} className="text-xs text-[var(--accent)]">Edit</button>
+                      <button onClick={() => setConfirmId(q.id)} aria-label={`Delete ${q.docNo}`} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Delete</button>
                     </span>
                   )}
                 </td>
@@ -1493,6 +1552,7 @@ function QuotationsPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       {printing && (
         <PrintDocument>
