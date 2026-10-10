@@ -226,7 +226,7 @@ describe("the proforma list", () => {
 });
 
 describe("the International and Private label buttons", () => {
-  it("with no form open, both are lit and neither is marked as chosen", () => {
+  it("with no form open, neither is lit and neither is marked as chosen", () => {
     const admin = { id: "u1", name: "Sai Admin", email: "docs.export@dasfoodindia.com", role: "admin", active: true, sections: [] };
     const html = renderToString(
       <AppCtx.Provider value={{ store: { ...emptyStore(), users: [admin] }, user: admin, loading: false, refresh: async () => {}, isAdmin: true, can: () => true }}>
@@ -235,11 +235,12 @@ describe("the International and Private label buttons", () => {
     const buttons = [...html.matchAll(/<button aria-pressed="(true|false)" class="([^"]*)"><svg[\s\S]*?<\/svg>\s*(International|Private label)<\/button>/g)];
     expect(buttons.map((b) => [b[3], b[1]])).toEqual([["International", "false"], ["Private label", "false"]]);
     expect(buttons[0][2]).toBe(buttons[1][2]);                           // drawn the same
+    expect(buttons[0][2]).not.toContain("bg-[var(--accent)]");          // and that is the quiet style, not the orange one
   });
 
-  it("the lit button is the kind of proforma whose form is open — not always International", () => {
-    expect(page).toContain("const lit = !form || (form.type === \"domestic\" ? \"domestic\" : \"international\") === kind;");
-    expect(page).toContain("aria-pressed={Boolean(form) && lit}");
+  it("the lit button is the kind of proforma whose form is open — never both, never always International", () => {
+    expect(page).toContain("const lit = Boolean(form) && (form.type === \"domestic\" ? \"domestic\" : \"international\") === kind;");
+    expect(page).toContain("aria-pressed={lit}");
     expect(page).toContain("className={(lit ? btn : btnGhost + \" py-2\") + \" flex items-center gap-1.5\"}");
     // neither button is hard-wired to the lit style any more
     expect(page).not.toMatch(/onClick=\{\(\) => open\("international"\)\} className=\{btn \+/);

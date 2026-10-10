@@ -2025,20 +2025,26 @@ function ProformaPage({ initialTab = "open" }) {
     if (!message) setNotice("Draft discarded.");
   };
 
-  // Delete (db/022): asked for twice — Delete, then Confirm — on the row itself.
-  // Only an open proforma; the database refuses an invoiced one, and one with
-  // a shipment draft against it, and says why. Its number comes free.
+  // Delete (db/022, db/026): asked for twice — Delete, then Confirm — on the row
+  // itself. An open proforma goes on its own. An invoiced one goes together
+  // with the shipment raised against it, because that shipment's documents
+  // cannot be drawn without the proforma; the row says so before Confirm, and
+  // the database will not do it unless it is told the shipment goes too.
   const [confirmId, setConfirmId] = useState(null);
+  const shipmentOf = (pi) => (pi.linkedFinalInvoiceId ? store.finalInvoices.find((f) => f.id === pi.linkedFinalInvoiceId) || null : null);
   const remove = async (pi) => {
+    const invoiced = Boolean(pi.linkedFinalInvoiceId);
     const message = await attempt(async () => {
-      await call("delete_proforma", { p_id: pi.id });
+      await call("delete_proforma", { p_id: pi.id, p_with_shipment: invoiced });
       await refresh();
     });
     setSaveError(message);
     setConfirmId(null);
     if (!message) {
       if (form && form.editing && form.editing.id === pi.id) setForm(null);
-      setNotice(`Proforma ${pi.docNo} was deleted. Its number can be used again.`);
+      setNotice(invoiced
+        ? `Proforma ${pi.docNo} and the shipment raised against it were deleted.`
+        : `Proforma ${pi.docNo} was deleted. Its number can be used again.`);
     }
   };
 
@@ -2096,12 +2102,12 @@ function ProformaPage({ initialTab = "open" }) {
         </div>
         <div className="flex items-center gap-3">
           <ExcelButton name="proforma-invoices" columns={excelColumns} rows={list} />
-          {/* The lit button is the kind of proforma whose form is open. With no form open,
-              both are lit: they are two equal ways to start one. */}
+          {/* The lit button is the kind of proforma whose form is open — and only that
+              one. With no form open neither is lit: nothing has been chosen yet. */}
           {[["international", "International"], ["domestic", "Private label"]].map(([kind, name]) => {
-            const lit = !form || (form.type === "domestic" ? "domestic" : "international") === kind;
+            const lit = Boolean(form) && (form.type === "domestic" ? "domestic" : "international") === kind;
             return (
-              <button key={kind} onClick={() => open(kind)} aria-pressed={Boolean(form) && lit}
+              <button key={kind} onClick={() => open(kind)} aria-pressed={lit}
                 className={(lit ? btn : btnGhost + " py-2") + " flex items-center gap-1.5"}>
                 <Plus className="h-4 w-4" /> {name}
               </button>
@@ -2149,6 +2155,19 @@ function ProformaPage({ initialTab = "open" }) {
                       <button onClick={() => { setDownloadId(null); downloadExcel(pi); }} className="text-xs text-[var(--accent)]">Excel</button>
                       <button onClick={() => setDownloadId(null)} aria-label="Close download options"><X className="h-3.5 w-3.5 text-[var(--muted)]" /></button>
                     </span>
+                  ) : confirmId === pi.id && pi.linkedFinalInvoiceId ? (
+                    // Invoiced: say plainly what else goes, before anything is deleted.
+                    <span className="flex flex-col items-end gap-1 whitespace-normal">
+                      <span className="max-w-xs text-xs text-[var(--status-danger)]">
+                        {pi.docNo} has been invoiced. Deleting it also deletes
+                        {shipmentOf(pi) ? ` shipment ${shipmentOf(pi).docNo}` : " the shipment raised against it"} and
+                        its tax invoice, commercial invoice and packing list.
+                      </span>
+                      <span className="flex items-center gap-3">
+                        <button onClick={() => remove(pi)} className="text-xs text-[var(--status-danger)]">Delete both</button>
+                        <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--muted)]">Cancel</button>
+                      </span>
+                    </span>
                   ) : confirmId === pi.id ? (
                     <span className="flex items-center justify-end gap-3">
                       <span className="text-xs text-[var(--status-danger)]">Delete {pi.docNo}?</span>
@@ -2164,13 +2183,11 @@ function ProformaPage({ initialTab = "open" }) {
                           Edit
                         </button>
                       )}
-                      {/* The same rule for Delete: an invoiced proforma is kept. */}
-                      {!pi.linkedFinalInvoiceId && (
-                        <button aria-label={`Delete ${pi.docNo}`} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]"
-                          onClick={() => { setSaveError(""); setNotice(""); setConfirmId(pi.id); }}>
-                          Delete
-                        </button>
-                      )}
+                      {/* Delete is on every proforma. An invoiced one is asked about differently (above). */}
+                      <button aria-label={`Delete ${pi.docNo}`} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]"
+                        onClick={() => { setSaveError(""); setNotice(""); setDownloadId(null); setConfirmId(pi.id); }}>
+                        Delete
+                      </button>
                       <button onClick={() => { setConfirmId(null); setDownloadId(pi.id); }} aria-label={`Download ${pi.docNo}`}
                         className="inline-flex items-center gap-1 text-xs text-[var(--accent)]">
                         <Download className="h-3 w-3" /> Download
