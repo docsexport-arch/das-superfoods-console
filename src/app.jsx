@@ -17,8 +17,8 @@ import { exportRows, exportBook } from "./lib/excel.js";
 import {
   shipmentModel, shipmentCompany, shipmentHeader, shipmentCharges, taxInvoiceTotals, commercialInvoiceTotals, bankRows, shipmentSheets,
 } from "./lib/shipment-docs.js";
-import { proformaSheetRows, proformaLineAmount, proformaUnits, fileSafe, PROFORMA_SHEET_WIDTHS, quotationModel, quotationFileName } from "./lib/documents.js";
-import { downloadQuotationWord } from "./lib/word.js";
+import { proformaSheetRows, proformaLineAmount, proformaUnits, fileSafe, PROFORMA_SHEET_WIDTHS, quotationModel, quotationFileName, proformaModel } from "./lib/documents.js";
+import { downloadQuotationWord, downloadProformaWord } from "./lib/word.js";
 import {
   pick, PARTY_KEYS, PARTY_PRODUCT_KEYS, QUOTATION_KEYS, PROFORMA_KEYS, SHIPMENT_KEYS, COMPANY_KEYS, DRAFT_KEYS,
 } from "./lib/payloads.js";
@@ -1880,131 +1880,92 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
 
 /* The proforma as a printed page. The browser's "Save as PDF" makes the file;
    the Excel download says the same thing from lib/documents.js.            */
+// Drawn from proformaModel, as the Word download is (lib/word.js) — one
+// description of the proforma, two files.
 function ProformaDocument({ pi, company }) {
-  const isIntl = pi.type === "international";
-  const lines = pi.items || [];
+  const m = proformaModel(pi, company);
   const small = { margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" };
   return (
     <div className="doc">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <p style={{ fontSize: 18, fontWeight: "bold", margin: 0 }}>{company.name || "Das Superfoods"}</p>
-          <p className="muted" style={{ margin: "2px 0 0", maxWidth: 320 }}>{company.address}</p>
-          <p className="muted" style={{ margin: "2px 0 0" }}>
-            {company.gstNo ? `GST ${company.gstNo}` : ""}{company.gstNo && company.iecCode ? " · " : ""}
-            {company.iecCode ? `IEC ${company.iecCode}` : ""}
-          </p>
+          <p style={{ fontSize: 18, fontWeight: "bold", margin: 0 }}>{m.companyName}</p>
+          <p className="muted" style={{ margin: "2px 0 0", maxWidth: 320 }}>{m.companyAddress}</p>
+          <p className="muted" style={{ margin: "2px 0 0" }}>{m.companyIds}</p>
         </div>
         <div style={{ textAlign: "right" }}>
-          <h1>Proforma invoice</h1>
-          <p style={{ margin: "6px 0 0" }}><b>PI No: {pi.docNo}</b></p>
-          <p className="muted" style={{ margin: 0 }}>PI Date: {fmtDate(pi.date)}</p>
-          {pi.buyerOrderNo && (
-            <React.Fragment>
-              <p className="muted" style={{ margin: 0 }}>Buyer Order No: {pi.buyerOrderNo}</p>
-              <p className="muted" style={{ margin: 0 }}>Buyer Order Date: {fmtDate(pi.buyerOrderDate)}</p>
-            </React.Fragment>
-          )}
+          <h1>{m.title}</h1>
+          <p style={{ margin: "6px 0 0" }}><b>{m.docNoLine}</b></p>
+          {m.headLines.map((line) => <p key={line} className="muted" style={{ margin: 0 }}>{line}</p>)}
         </div>
       </div>
       <div className="rule" />
 
       <div style={{ display: "flex", gap: 32 }}>
-        <div style={{ flex: 1 }}>
-          <p className="muted" style={small}>Buyer</p>
-          <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{pi.buyerName}</p>
-          <p className="muted" style={{ margin: 0 }}>{pi.buyerAddress}</p>
-        </div>
-        <div style={{ flex: 1 }}>
-          <p className="muted" style={small}>{isIntl ? "Consignee" : "Ship to"}</p>
-          <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{pi.consigneeName || "—"}</p>
-          <p className="muted" style={{ margin: 0 }}>{pi.consigneeAddress}</p>
-        </div>
+        {m.parties.map((p) => (
+          <div key={p.label} style={{ flex: 1 }}>
+            <p className="muted" style={small}>{p.label}</p>
+            <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{p.name}</p>
+            <p className="muted" style={{ margin: 0 }}>{p.address}</p>
+          </div>
+        ))}
       </div>
 
       <div style={{ display: "flex", gap: 32, marginTop: 12 }}>
-        {(pi.portOfLoading || pi.destinationPort) && (
-          <div style={{ flex: 1 }}>
-            <p className="muted" style={small}>Ports</p>
-            <p style={{ margin: "3px 0 0" }}>Loading: {pi.portOfLoading || "—"}</p>
-            <p style={{ margin: 0 }}>Destination: {pi.destinationPort || "—"}</p>
+        {[m.ports, m.terms].filter(Boolean).map((block) => (
+          <div key={block.label} style={{ flex: 1 }}>
+            <p className="muted" style={small}>{block.label}</p>
+            {block.lines.map((line, i) => <p key={i} style={{ margin: i === 0 ? "3px 0 0" : 0 }}>{line}</p>)}
           </div>
-        )}
-        <div style={{ flex: 1 }}>
-          <p className="muted" style={small}>Terms</p>
-          <p style={{ margin: "3px 0 0" }}>Shipment: {pi.shipmentTerm || "—"}{pi.currency === "INR" ? "" : ` · Currency: ${pi.currency}`}</p>
-          <p style={{ margin: 0 }}>Payment: {pi.paymentTerm || "—"}</p>
-        </div>
+        ))}
       </div>
 
       <table>
         <thead>
           <tr>
-            <th style={{ width: 28 }}>#</th>
-            <th>Product</th>
-            <th style={{ width: 80 }}>HSN</th>
-            <th className="num" style={{ width: 60 }}>Boxes</th>
-            <th className="num" style={{ width: 60 }}>Units</th>
-            <th className="num" style={{ width: 86 }}>{isIntl ? "Rate / box" : "MRP / box"}</th>
-            <th className="num" style={{ width: 100 }}>{isIntl ? "Amount" : "Taxable value"}</th>
+            {m.columns.map((c) => (
+              <th key={c.label} className={c.num ? "num" : undefined} style={c.width ? { width: c.width } : undefined}>{c.label}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {lines.map((it, i) => (
-            <tr key={it.id || i}>
-              <td>{i + 1}</td>
-              <td>{it.name}</td>
-              <td>{it.hsn}</td>
-              <td className="num">{it.boxQty}</td>
-              <td className="num">{unitsFromBoxes(it.boxQty, it.packsPerBox)}</td>
-              <td className="num">{fmtNum(isIntl ? it.rate : it.mrp)}</td>
-              <td className="num">{fmtNum(proformaLineAmount(pi, it))}</td>
+          {m.lines.map((cells, i) => (
+            <tr key={(pi.items[i] && pi.items[i].id) || i}>
+              {cells.map((text, j) => <td key={j} className={m.columns[j].num ? "num" : undefined}>{text}</td>)}
             </tr>
           ))}
-          <tr>
-            <td colSpan={3} className="num"><b>Total</b></td>
-            <td className="num"><b>{pi.totalBoxes}</b></td>
-            <td className="num"><b>{proformaUnits(pi)}</b></td>
-            <td></td>
-            <td className="num"><b>{fmtNum(isIntl ? pi.totalValue : pi.taxableValue)}</b></td>
-          </tr>
-          {!isIntl && (
-            <tr>
-              <td colSpan={6} className="num">Tax @ {fmtNum(pi.taxRate, 2)}%</td>
-              <td className="num">{fmtNum(pi.taxAmount)}</td>
+          {m.totals.map((row, r) => (
+            <tr key={r}>
+              {row.map((c, j) => (c.bare
+                ? <td key={j}></td>
+                : <td key={j} colSpan={c.span} className="num">{c.strong ? <b>{c.text}</b> : c.text}</td>))}
             </tr>
-          )}
-          <tr>
-            <td colSpan={6} className="num"><b>Grand total ({pi.currency})</b></td>
-            <td className="num"><b>{fmtNum(pi.grandTotal)}</b></td>
-          </tr>
+          ))}
         </tbody>
       </table>
 
-      <p style={{ marginTop: 8, fontStyle: "italic" }}>Amount in words: {amountInWords(pi.grandTotal, pi.currency)}</p>
-      {conditionsFromText(pi.conditions).length === 1 && (
-        <p className="muted" style={{ marginTop: 10, fontSize: 11 }}>Conditions: {conditionsFromText(pi.conditions)[0]}</p>
+      <p style={{ marginTop: 8, fontStyle: "italic" }}>{m.words}</p>
+      {m.conditions && m.conditions.inline && (
+        <p className="muted" style={{ marginTop: 10, fontSize: 11 }}>{m.conditions.inline}</p>
       )}
-      {conditionsFromText(pi.conditions).length > 1 && (
+      {m.conditions && m.conditions.lines && (
         <div className="muted" style={{ marginTop: 10, fontSize: 11 }}>
-          <p style={{ margin: 0 }}>Conditions</p>
-          {conditionsFromText(pi.conditions).map((c, i) => <p key={i} style={{ margin: 0 }}>{i + 1}. {c}</p>)}
+          <p style={{ margin: 0 }}>{m.conditions.label}</p>
+          {m.conditions.lines.map((line, i) => <p key={i} style={{ margin: 0 }}>{line}</p>)}
         </div>
       )}
-      {pi.additionalDetails && <p className="muted" style={{ marginTop: 6, fontSize: 11 }}>{pi.additionalDetails}</p>}
+      {m.additional && <p className="muted" style={{ marginTop: 6, fontSize: 11 }}>{m.additional}</p>}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 28 }}>
         <div>
-          <p style={{ margin: 0, fontWeight: "bold" }}>BANK DETAILS FOR TRANSFER</p>
-          <p style={{ margin: "3px 0 0" }}><b>Account Name:</b> {company.accountName || "—"}</p>
-          <p style={{ margin: 0 }}><b>Bank:</b> {company.bankName || "—"}</p>
-          <p style={{ margin: 0 }}><b>Branch:</b> {company.bankBranch || "—"}</p>
-          <p style={{ margin: 0 }}><b>Account Number:</b> {company.accountNo || "—"}</p>
-          <p style={{ margin: 0 }}><b>Swift Code:</b> {company.swift || "—"}</p>
+          <p style={{ margin: 0, fontWeight: "bold" }}>{m.bank.title}</p>
+          {m.bank.rows.map(([name, value], i) => (
+            <p key={name} style={{ margin: i === 0 ? "3px 0 0" : 0 }}><b>{name}</b> {value}</p>
+          ))}
         </div>
         <div style={{ textAlign: "right" }}>
-          <p style={{ margin: 0 }}>For <b>{company.name || "Das Superfoods"}</b></p>
-          <p className="muted" style={{ margin: "44px 0 0" }}>Authorised signatory</p>
+          <p style={{ margin: 0 }}>For <b>{m.signFor}</b></p>
+          <p className="muted" style={{ margin: "44px 0 0" }}>{m.signatory}</p>
         </div>
       </div>
     </div>
@@ -2097,6 +2058,9 @@ function ProformaPage({ initialTab = "open" }) {
     return () => clearTimeout(t);
   }, [printing]);
 
+  // Download → Word: the same proforma as the PDF, as a .docx that can be edited.
+  const downloadWord = async (pi) => { setSaveError(""); setSaveError(await attempt(() => downloadProformaWord(pi, store.company))); };
+
   // Download → Excel: the same document as rows.
   const downloadExcel = async (pi) => {
     const message = await attempt(() => exportRows(
@@ -2132,8 +2096,17 @@ function ProformaPage({ initialTab = "open" }) {
         </div>
         <div className="flex items-center gap-3">
           <ExcelButton name="proforma-invoices" columns={excelColumns} rows={list} />
-          <button onClick={() => open("international")} className={btn + " flex items-center gap-1.5"}><Plus className="h-4 w-4" /> International</button>
-          <button onClick={() => open("domestic")} className={btnGhost + " flex items-center gap-1.5 py-2"}><Plus className="h-4 w-4" /> Private label</button>
+          {/* The lit button is the kind of proforma whose form is open. With no form open,
+              both are lit: they are two equal ways to start one. */}
+          {[["international", "International"], ["domestic", "Private label"]].map(([kind, name]) => {
+            const lit = !form || (form.type === "domestic" ? "domestic" : "international") === kind;
+            return (
+              <button key={kind} onClick={() => open(kind)} aria-pressed={Boolean(form) && lit}
+                className={(lit ? btn : btnGhost + " py-2") + " flex items-center gap-1.5"}>
+                <Plus className="h-4 w-4" /> {name}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -2172,6 +2145,7 @@ function ProformaPage({ initialTab = "open" }) {
                   {downloadId === pi.id ? (
                     <span className="flex items-center justify-end gap-3">
                       <button onClick={() => { setDownloadId(null); setPrinting(pi); }} className="text-xs text-[var(--accent)]">PDF</button>
+                      <button onClick={() => { setDownloadId(null); downloadWord(pi); }} className="text-xs text-[var(--accent)]">Word</button>
                       <button onClick={() => { setDownloadId(null); downloadExcel(pi); }} className="text-xs text-[var(--accent)]">Excel</button>
                       <button onClick={() => setDownloadId(null)} aria-label="Close download options"><X className="h-3.5 w-3.5 text-[var(--muted)]" /></button>
                     </span>

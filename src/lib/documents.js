@@ -129,3 +129,77 @@ export function quotationModel(q, company = {}) {
     signatory: "Authorised signatory",
   };
 }
+
+// What a proforma invoice says, piece by piece — the printed page (PDF) and
+// the Word download are both drawn from this (decisions/033). The totals are
+// the stored ones; only a line's own amount and its units are worked out.
+export function proformaModel(pi, company = {}) {
+  const isIntl = pi.type === "international";
+  const companyName = company.name || "Das Superfoods";
+  const conditions = conditionsFromText(pi.conditions);
+  const text = (value) => (value === null || value === undefined ? "" : String(value));
+  const totals = [[
+    { text: "Total", span: 3, strong: true },
+    { text: text(pi.totalBoxes), strong: true },
+    { text: text(proformaUnits(pi)), strong: true },
+    { text: "", bare: true },
+    { text: fmtNum(isIntl ? pi.totalValue : pi.taxableValue), strong: true },
+  ]];
+  if (!isIntl) totals.push([{ text: `Tax @ ${fmtNum(pi.taxRate, 2)}%`, span: 6 }, { text: fmtNum(pi.taxAmount) }]);
+  totals.push([{ text: `Grand total (${pi.currency})`, span: 6, strong: true }, { text: fmtNum(pi.grandTotal), strong: true }]);
+  return {
+    companyName,
+    companyAddress: company.address || "",
+    companyIds: [company.gstNo ? `GST ${company.gstNo}` : "", company.iecCode ? `IEC ${company.iecCode}` : ""].filter(Boolean).join(" · "),
+    title: "Proforma invoice",
+    docNo: pi.docNo || "",
+    docNoLine: `PI No: ${pi.docNo || ""}`,
+    headLines: [
+      `PI Date: ${fmtDate(pi.date)}`,
+      ...(pi.buyerOrderNo ? [`Buyer Order No: ${pi.buyerOrderNo}`, `Buyer Order Date: ${fmtDate(pi.buyerOrderDate)}`] : []),
+    ],
+    parties: [
+      { label: "Buyer", name: pi.buyerName || "", address: pi.buyerAddress || "" },
+      // A private-label proforma heads this party "Ship to", never "Consignee" (decisions/014).
+      { label: isIntl ? "Consignee" : "Ship to", name: pi.consigneeName || "—", address: pi.consigneeAddress || "" },
+    ],
+    ports: pi.portOfLoading || pi.destinationPort
+      ? { label: "Ports", lines: [`Loading: ${pi.portOfLoading || "—"}`, `Destination: ${pi.destinationPort || "—"}`] }
+      : null,
+    terms: {
+      label: "Terms",
+      // A rupee proforma prints no Currency line (decisions/015).
+      lines: [
+        `Shipment: ${pi.shipmentTerm || "—"}${pi.currency === "INR" ? "" : ` · Currency: ${pi.currency}`}`,
+        `Payment: ${pi.paymentTerm || "—"}`,
+      ],
+    },
+    // width in px on the printed page; the column without one takes the rest
+    columns: [
+      { label: "#", width: 28 }, { label: "Product" }, { label: "HSN", width: 80 },
+      { label: "Boxes", width: 60, num: true }, { label: "Units", width: 60, num: true },
+      { label: isIntl ? "Rate / box" : "MRP / box", width: 86, num: true },
+      { label: isIntl ? "Amount" : "Taxable value", width: 100, num: true },
+    ],
+    lines: (pi.items || []).map((it, i) => [
+      String(i + 1), text(it.name), text(it.hsn), text(it.boxQty), text(unitsFromBoxes(it.boxQty, it.packsPerBox)),
+      fmtNum(isIntl ? it.rate : it.mrp), fmtNum(proformaLineAmount(pi, it)),
+    ]),
+    totals,
+    words: `Amount in words: ${amountInWords(pi.grandTotal, pi.currency)}`,
+    // One condition prints on one line; several print as a numbered list.
+    conditions: conditions.length === 1 ? { inline: `Conditions: ${conditions[0]}` }
+      : conditions.length > 1 ? { label: "Conditions", lines: conditions.map((c, i) => `${i + 1}. ${c}`) }
+      : null,
+    additional: pi.additionalDetails || "",
+    bank: {
+      title: "BANK DETAILS FOR TRANSFER",
+      rows: [
+        ["Account Name:", company.accountName || "—"], ["Bank:", company.bankName || "—"], ["Branch:", company.bankBranch || "—"],
+        ["Account Number:", company.accountNo || "—"], ["Swift Code:", company.swift || "—"],
+      ],
+    },
+    signFor: companyName,
+    signatory: "Authorised signatory",
+  };
+}
