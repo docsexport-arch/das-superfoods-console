@@ -2,7 +2,7 @@
 // same description the printed page (PDF) is drawn from — so it carries the
 // same words and the same figures, laid out the same way. Unlike the PDF,
 // every part of it can be edited in Word afterwards.
-import { quotationModel, fileSafe } from "./documents.js";
+import { quotationModel, quotationFileName } from "./documents.js";
 
 // The print colours of tokens.css, as Word wants them.
 const INK = "111111";
@@ -97,7 +97,7 @@ export function buildQuotationDocx(docx, m) {
       ],
       [
         para(run(m.title, { bold: true, size: TITLE, caps: true, tracking: 36 }), { right: true }),
-        para(run(m.docNo, { bold: true }), { right: true, before: px(6) }),
+        para(run(m.docNoLine, { bold: true }), { right: true, before: px(6) }),
         para(run(m.date, { muted: true }), { right: true }),
       ],
       [Math.round(CONTENT * 0.6), CONTENT - Math.round(CONTENT * 0.6)],
@@ -121,7 +121,6 @@ export function buildQuotationDocx(docx, m) {
       para(run(m.conditionsLabel, { muted: true, size: SMALL, caps: true, tracking: 10 }), { before: px(16), keepNext: true }),
       ...m.conditions.map((t, i) => para(run(t), { before: i === 0 ? px(3) : px(2) })),
     ] : []),
-    para(run(m.note, { muted: true, size: SMALL }), { before: px(18) }),
     para([run("For "), run(m.signFor, { bold: true })], { right: true, before: px(48), keepNext: true }),
     para(run(m.signatory, { muted: true }), { right: true, before: px(44) }),
   ];
@@ -139,7 +138,7 @@ export function buildQuotationDocx(docx, m) {
   });
 }
 
-export const quotationWordName = (q) => `Quotation-${fileSafe(q.docNo)}.docx`;
+export const quotationWordName = (q) => `${quotationFileName(q)}.docx`;
 
 // The library is large and only a Word download needs it, so it is loaded then.
 export async function downloadQuotationWord(q, company) {

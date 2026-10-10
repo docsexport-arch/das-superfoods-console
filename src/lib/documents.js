@@ -13,6 +13,14 @@ export const proformaUnits = (pi) =>
 // A typed number can hold "/" or spaces; a file name cannot.
 export const fileSafe = (text) => String(text || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "document";
 
+// A quotation's PDF and Word file are both named "Buyer Name_Quotation number"
+// (decisions/030). The name is kept as it reads; only what a file name cannot
+// hold goes: \ / : | become a dash; * ? " < > and control characters are dropped.
+const namePart = (text) => String(text || "")
+  .replace(/[*?"<>\u0000-\u001F]+/g, " ").replace(/\s*[\\/:|]+\s*/g, "-").replace(/\s+/g, " ").trim().replace(/^[-. ]+|[-. ]+$/g, "");
+export const quotationFileName = (q) =>
+  `${namePart(q.buyerName) || "Quotation"}_${namePart(q.docNo) || "document"}`;
+
 export const PROFORMA_SHEET_WIDTHS = [18, 38, 14, 18, 14, 16, 18];
 
 /* The proforma as a sheet: letterhead, the parties, the terms, the lines, the
@@ -95,6 +103,7 @@ export function quotationModel(q, company = {}) {
     companyIds: [company.gstNo ? `GST ${company.gstNo}` : "", company.iecCode ? `IEC ${company.iecCode}` : ""].filter(Boolean).join(" · "),
     title: "Quotation",
     docNo: q.docNo || "",
+    docNoLine: `Quotation No.: ${q.docNo || ""}`,
     date: `Date: ${fmtDate(q.date)}`,
     toLabel: "Quotation to",
     buyerName: q.buyerName || "",
@@ -116,9 +125,6 @@ export function quotationModel(q, company = {}) {
     // Terms typed on this quotation (db/024), numbered in the order they were typed. None typed — no heading.
     conditionsLabel: "Terms & conditions",
     conditions: conditionsFromText(q.terms).map((term, i) => `${i + 1}. ${term}`),
-    note: `This quotation is valid for 30 days from the date above. Prices are quoted on ${q.shipmentTerm || "the agreed"} terms and `
-      + "are subject to confirmation of availability at the time of order."
-      + (isDomestic ? "" : " IGST is not applicable on export supplies."),
     signFor: companyName,
     signatory: "Authorised signatory",
   };

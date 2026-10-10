@@ -67,9 +67,9 @@ describe("what the quotation file says about terms", () => {
       const at = lines.indexOf("Terms & conditions");
       expect(at).toBeGreaterThan(-1);
       expect(lines.slice(at + 1, at + 1 + NUMBERED.length)).toEqual(NUMBERED);
-      // after the amount in words, before the validity note and the signature
-      expect(lines.findIndex((l) => l.startsWith("Amount in words:"))).toBeLessThan(at);
-      expect(lines.findIndex((l) => l.startsWith("This quotation is valid"))).toBeGreaterThan(at + NUMBERED.length);
+      // after the amount in words, and straight before the signature
+      expect(lines.findIndex((l) => l.startsWith("Amount in words:"))).toBe(at - 1);
+      expect(lines[at + 1 + NUMBERED.length]).toMatch(/^For\b/);
       expect(lines.indexOf("Authorised signatory")).toBeGreaterThan(at);
     }
   });
@@ -84,11 +84,12 @@ describe("what the quotation file says about terms", () => {
     }
   });
 
-  it("the typed terms are added to the quotation; the shipment and payment terms and the validity note stay", async () => {
+  it("the typed terms are the only terms below the table; the shipment and payment terms stay at the top", async () => {
     for (const lines of [pdfLines(withTerms), await wordLines(withTerms)]) {
       expect(lines).toContain("Shipment: FOB");
       expect(lines).toContain("Payment: 100% advance");
-      expect(lines.some((l) => l.startsWith("This quotation is valid for 30 days"))).toBe(true);
+      // the standing validity line was removed on the owner's instruction (decisions/030)
+      expect(lines.some((l) => /valid for 30 days/i.test(l))).toBe(false);
     }
   });
 

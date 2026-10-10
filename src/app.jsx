@@ -17,7 +17,7 @@ import { exportRows, exportBook } from "./lib/excel.js";
 import {
   shipmentModel, shipmentCompany, shipmentHeader, shipmentCharges, taxInvoiceTotals, commercialInvoiceTotals, bankRows, shipmentSheets,
 } from "./lib/shipment-docs.js";
-import { proformaSheetRows, proformaLineAmount, proformaUnits, fileSafe, PROFORMA_SHEET_WIDTHS, quotationModel } from "./lib/documents.js";
+import { proformaSheetRows, proformaLineAmount, proformaUnits, fileSafe, PROFORMA_SHEET_WIDTHS, quotationModel, quotationFileName } from "./lib/documents.js";
 import { downloadQuotationWord } from "./lib/word.js";
 import {
   pick, PARTY_KEYS, PARTY_PRODUCT_KEYS, QUOTATION_KEYS, PROFORMA_KEYS, SHIPMENT_KEYS, COMPANY_KEYS, DRAFT_KEYS,
@@ -1113,7 +1113,7 @@ function QuotationDocument({ q, company }) {
         </div>
         <div style={{ textAlign: "right" }}>
           <h1>{m.title}</h1>
-          <p style={{ margin: "6px 0 0" }}><b>{m.docNo}</b></p>
+          <p style={{ margin: "6px 0 0" }}><b>{m.docNoLine}</b></p>
           <p className="muted" style={{ margin: 0 }}>{m.date}</p>
         </div>
       </div>
@@ -1166,8 +1166,6 @@ function QuotationDocument({ q, company }) {
         </div>
       )}
 
-      <p className="muted" style={{ marginTop: 18, fontSize: 11 }}>{m.note}</p>
-
       <div style={{ marginTop: 48, textAlign: "right" }}>
         <p style={{ margin: 0 }}>For <b>{m.signFor}</b></p>
         <p className="muted" style={{ margin: "44px 0 0" }}>{m.signatory}</p>
@@ -1185,6 +1183,10 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
   const [country, setCountry] = useState(initial ? initial.country : "");
   const [shipmentTerm, setShipmentTerm] = useState(initial ? initial.shipmentTerm || "FOB" : "FOB");
   const [paymentTerm, setPaymentTerm] = useState(initial ? initial.paymentTerm || "" : "");
+  // The number and the date can be typed (db/025). A new quotation left
+  // without a number is given the next one in the series; the date starts as today.
+  const [docNo, setDocNo] = useState(initial ? initial.docNo || "" : "");
+  const [docDate, setDocDate] = useState(initial ? initial.date || "" : todayIST());
   // The currency the prices are in (db/023). Until it is picked by hand it
   // follows the party chosen, else the country: rupees for India, dollars otherwise.
   const [currencyPick, setCurrencyPick] = useState(initial ? quoteCurrencyOf(initial.currency) : "");
@@ -1219,6 +1221,7 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
     setBusy(true); setError("");
     const payload = {
       partyId, buyerName, buyerAddress, country, shipmentTerm, paymentTerm, currency,
+      docNo: docNo.trim(), docDate,
       terms: conditionsToText(terms),
       items, igst, igstRate, totalValue: total, igstAmt, grandTotal: grand,
     };
@@ -1231,6 +1234,10 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
     <div className={card + " mb-6 p-6"}>
       <p className="mb-5 font-display text-lg">{isEdit ? `Edit ${initial.docNo}` : "New quotation"}</p>
       <div className="mb-5 grid gap-4 md:grid-cols-4">
+        <Field label="Quotation no." hint={isEdit ? undefined : "Leave empty for an automatic number"}>
+          <input className={input} value={docNo} maxLength={40} onChange={(e) => { setDocNo(e.target.value); setError(""); }} />
+        </Field>
+        <Field label="Date"><input type="date" className={input} value={docDate} onChange={(e) => setDocDate(e.target.value)} /></Field>
         <Field label="Party (optional autofill)">
           <select className={input} value={partyId} onChange={(e) => {
             setPartyId(e.target.value);
@@ -1359,7 +1366,14 @@ function QuotationsPage() {
 
   useEffect(() => {
     if (!printing) return undefined;
-    const t = setTimeout(() => { window.print(); setPrinting(null); }, 60);
+    // The browser's "Save as PDF" names the file after the page title.
+    const title = document.title;
+    const t = setTimeout(() => {
+      document.title = quotationFileName(printing);
+      window.print();
+      document.title = title;
+      setPrinting(null);
+    }, 60);
     return () => clearTimeout(t);
   }, [printing]);
 
@@ -1369,6 +1383,11 @@ function QuotationsPage() {
     String(i.product || "").trim() !== "" || toNumber(i.boxQty) !== 0 || toNumber(i.boxRate) !== 0);
 
   const save = (extra, done) => async (payload) => {
+    // Said here so it is said at once; the database checks the same and decides (db/025).
+    const typed = String(payload.docNo || "").trim();
+    if (typed && store.quotations.some((q) => q.id !== extra.id && String(q.docNo || "").trim().toUpperCase() === typed.toUpperCase())) {
+      return `Quotation number ${typed} is already in use. Type a different number.`;
+    }
     const message = await attempt(async () => {
       await call("save_quotation", { p: pick({ ...payload, ...extra, items: cleanItems(payload.items) }, QUOTATION_KEYS) });
       await refresh();

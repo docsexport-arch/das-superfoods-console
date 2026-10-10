@@ -35,10 +35,10 @@ const indiaQ = { ...exportQ, id: "q2", docNo: "Q/26-27/002", country: "India", i
 
 // Every piece of wording in a model, in reading order.
 const said = (m) => [
-  m.companyName, m.companyAddress, m.companyIds, m.title, m.docNo, m.date,
+  m.companyName, m.companyAddress, m.companyIds, m.title, m.docNoLine, m.date,
   m.toLabel, m.buyerName, m.buyerAddress, m.country, m.termsLabel, ...m.terms,
   ...m.columns.flatMap((c) => c.lines || [c.label]), ...m.lines.flat(), ...m.totals.flatMap((t) => [t.label, t.value]),
-  m.words, ...(m.conditions.length ? [m.conditionsLabel, ...m.conditions] : []), m.note, m.signFor, m.signatory,
+  m.words, ...(m.conditions.length ? [m.conditionsLabel, ...m.conditions] : []), m.signFor, m.signatory,
 ].filter((s) => String(s).trim() !== "");
 
 const unescape = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;|&#39;|&#x27;/g, "'").replace(/&amp;/g, "&");
@@ -55,17 +55,28 @@ const pdfText = (q, c = company) => unescape(renderToString(<QuotationDocument q
   .replace(/<!-- -->/g, "").replace(/<[^>]+>/g, "\n"));
 
 describe("what a quotation says", () => {
-  it("an export quotation: no tax line, and the export note", () => {
+  it("an export quotation: no tax line", () => {
     const m = quotationModel(exportQ, company);
     expect(m.totals.map((t) => t.label)).toEqual(["Total", "Grand total"]);
-    expect(m.note).toMatch(/quoted on FOB terms and are subject to confirmation of availability at the time of order\. IGST is not applicable on export supplies\.$/);
     expect(m.lines[0]).toEqual(["1", "Peanut Butter Creamy 340g", "20081100", "100", "17.77", "1,777.00"]);
   });
 
-  it("an Indian quotation: the IGST line, and no export note", () => {
+  it("an Indian quotation: the IGST line", () => {
     const m = quotationModel(indiaQ, company);
     expect(m.totals.map((t) => t.label)).toEqual(["Total", "IGST @ 5.00%", "Grand total"]);
-    expect(m.note).not.toContain("IGST is not applicable");
+  });
+
+  it("the number is labelled: Quotation No.", () => {
+    expect(quotationModel(exportQ, company).docNoLine).toBe("Quotation No.: Q/26-27/001");
+  });
+
+  it("the standing validity line is gone from every quotation, export or Indian (decisions/030)", async () => {
+    for (const q of [exportQ, indiaQ]) {
+      expect(quotationModel(q, company)).not.toHaveProperty("note");
+      for (const said of [pdfText(q), (await opened(q)).all]) {
+        expect(said).not.toMatch(/valid for 30 days|subject to confirmation of availability|IGST is not applicable/i);
+      }
+    }
   });
 
   it("the totals are the stored ones, not re-added", () => {
@@ -169,9 +180,9 @@ describe("the Word file itself", () => {
     expect(all).toContain("Grand total");
   });
 
-  it("is named after the quotation", () => {
-    expect(quotationWordName(exportQ)).toBe("Quotation-Q-26-27-001.docx");
-    expect(quotationWordName({ docNo: "" })).toBe("Quotation-document.docx");
+  it("is named Buyer Name_Quotation number", () => {
+    expect(quotationWordName({ buyerName: "Sample Importers Inc.", docNo: "DS-QUO-2026-0007" })).toBe("Sample Importers Inc_DS-QUO-2026-0007.docx");
+    expect(quotationWordName(exportQ)).toBe("Buyer & Sons Trading_Q-26-27-001.docx");
   });
 });
 
