@@ -17,7 +17,8 @@ import { exportRows, exportBook } from "./lib/excel.js";
 import {
   shipmentModel, shipmentCompany, shipmentHeader, shipmentCharges, taxInvoiceTotals, commercialInvoiceTotals, bankRows, shipmentSheets,
 } from "./lib/shipment-docs.js";
-import { proformaSheetRows, proformaLineAmount, proformaUnits, fileSafe, PROFORMA_SHEET_WIDTHS } from "./lib/documents.js";
+import { proformaSheetRows, proformaLineAmount, proformaUnits, fileSafe, PROFORMA_SHEET_WIDTHS, quotationModel } from "./lib/documents.js";
+import { downloadQuotationWord } from "./lib/word.js";
 import {
   pick, PARTY_KEYS, PARTY_PRODUCT_KEYS, QUOTATION_KEYS, PROFORMA_KEYS, SHIPMENT_KEYS, COMPANY_KEYS, DRAFT_KEYS,
 } from "./lib/payloads.js";
@@ -1097,91 +1098,70 @@ function PrintDocument({ children }) {
   return createPortal(<div id="print-portal">{children}</div>, document.body);
 }
 
+// Drawn from quotationModel, as the Word download is (lib/word.js) — one
+// description of the quotation, two files.
 function QuotationDocument({ q, company }) {
-  const isDomestic = (q.country || "").trim().toLowerCase() === "india";
+  const m = quotationModel(q, company);
+  const last = m.columns.length - 1;
   return (
     <div className="doc">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <p style={{ fontSize: 18, fontWeight: "bold", margin: 0 }}>{company.name || "Das Superfoods"}</p>
-          <p className="muted" style={{ margin: "2px 0 0", maxWidth: 320 }}>{company.address}</p>
-          <p className="muted" style={{ margin: "2px 0 0" }}>
-            {company.gstNo ? `GST ${company.gstNo}` : ""}{company.gstNo && company.iecCode ? " · " : ""}
-            {company.iecCode ? `IEC ${company.iecCode}` : ""}
-          </p>
+          <p style={{ fontSize: 18, fontWeight: "bold", margin: 0 }}>{m.companyName}</p>
+          <p className="muted" style={{ margin: "2px 0 0", maxWidth: 320 }}>{m.companyAddress}</p>
+          <p className="muted" style={{ margin: "2px 0 0" }}>{m.companyIds}</p>
         </div>
         <div style={{ textAlign: "right" }}>
-          <h1>Quotation</h1>
-          <p style={{ margin: "6px 0 0" }}><b>{q.docNo}</b></p>
-          <p className="muted" style={{ margin: 0 }}>Date: {fmtDate(q.date)}</p>
+          <h1>{m.title}</h1>
+          <p style={{ margin: "6px 0 0" }}><b>{m.docNo}</b></p>
+          <p className="muted" style={{ margin: 0 }}>{m.date}</p>
         </div>
       </div>
       <div className="rule" />
 
       <div style={{ display: "flex", gap: 32 }}>
         <div style={{ flex: 1 }}>
-          <p className="muted" style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>Quotation to</p>
-          <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{q.buyerName}</p>
-          <p className="muted" style={{ margin: 0 }}>{q.buyerAddress}</p>
-          <p className="muted" style={{ margin: 0 }}>{q.country}</p>
+          <p className="muted" style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>{m.toLabel}</p>
+          <p style={{ margin: "3px 0 0", fontWeight: "bold" }}>{m.buyerName}</p>
+          <p className="muted" style={{ margin: 0 }}>{m.buyerAddress}</p>
+          <p className="muted" style={{ margin: 0 }}>{m.country}</p>
         </div>
         <div style={{ flex: 1 }}>
-          <p className="muted" style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>Terms</p>
-          <p style={{ margin: "3px 0 0" }}>Shipment: {q.shipmentTerm || "—"}</p>
-          <p style={{ margin: 0 }}>Payment: {q.paymentTerm || "—"}</p>
+          <p className="muted" style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>{m.termsLabel}</p>
+          {m.terms.map((t, i) => <p key={t} style={{ margin: i === 0 ? "3px 0 0" : 0 }}>{t}</p>)}
         </div>
       </div>
 
       <table>
         <thead>
           <tr>
-            <th style={{ width: 28 }}>#</th>
-            <th>Product</th>
-            <th style={{ width: 90 }}>HSN</th>
-            <th className="num" style={{ width: 70 }}>Boxes</th>
-            <th className="num" style={{ width: 90 }}>Rate / box</th>
-            <th className="num" style={{ width: 100 }}>Amount</th>
+            {m.columns.map((c) => (
+              <th key={c.label} className={c.num ? "num" : undefined} style={c.width ? { width: c.width } : undefined}>{c.label}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {(q.items || []).map((it, i) => (
-            <tr key={it.id || i}>
-              <td>{i + 1}</td>
-              <td>{it.product}</td>
-              <td>{it.hsn}</td>
-              <td className="num">{it.boxQty}</td>
-              <td className="num">{fmtNum(it.boxRate)}</td>
-              <td className="num">{fmtNum(Number(it.boxQty) * Number(it.boxRate))}</td>
+          {m.lines.map((cells, i) => (
+            <tr key={(q.items[i] && q.items[i].id) || i}>
+              {cells.map((text, j) => <td key={j} className={m.columns[j].num ? "num" : undefined}>{text}</td>)}
             </tr>
           ))}
-          <tr>
-            <td colSpan={5} className="num"><b>Total</b></td>
-            <td className="num"><b>{fmtNum(q.totalValue)}</b></td>
-          </tr>
-          {isDomestic && Number(q.igstAmt) > 0 && (
-            <tr>
-              <td colSpan={5} className="num">IGST @ {fmtNum(q.igstRate, 2)}%</td>
-              <td className="num">{fmtNum(q.igstAmt)}</td>
+          {m.totals.map((t) => (
+            <tr key={t.label}>
+              <td colSpan={last} className="num">{t.strong ? <b>{t.label}</b> : t.label}</td>
+              <td className="num">{t.strong ? <b>{t.value}</b> : t.value}</td>
             </tr>
-          )}
-          <tr>
-            <td colSpan={5} className="num"><b>Grand total</b></td>
-            <td className="num"><b>{fmtNum(q.grandTotal)}</b></td>
-          </tr>
+          ))}
         </tbody>
       </table>
 
-      <p style={{ marginTop: 8, fontStyle: "italic" }}>Amount in words: {amountInWords(q.grandTotal)}</p>
+      <p style={{ marginTop: 8, fontStyle: "italic" }}>{m.words}</p>
 
-      <p className="muted" style={{ marginTop: 18, fontSize: 11 }}>
-        This quotation is valid for 30 days from the date above. Prices are quoted on {q.shipmentTerm || "the agreed"} terms and
-        are subject to confirmation of availability at the time of order.
-        {!isDomestic && " IGST is not applicable on export supplies."}
-      </p>
+      <p className="muted" style={{ marginTop: 18, fontSize: 11 }}>{m.note}</p>
 
       <div style={{ marginTop: 48, textAlign: "right" }}>
-        <p style={{ margin: 0 }}>For <b>{company.name || "Das Superfoods"}</b></p>
-        <p className="muted" style={{ margin: "44px 0 0" }}>Authorised signatory</p>
+        <p style={{ margin: 0 }}>For <b>{m.signFor}</b></p>
+        <p className="muted" style={{ margin: "44px 0 0" }}>{m.signatory}</p>
       </div>
     </div>
   );
@@ -1358,6 +1338,9 @@ function QuotationsPage() {
     if (!message) setConfirmId(null);
   };
 
+  // Download → Word: the same quotation as the PDF, as a .docx that can be edited.
+  const downloadWord = async (q) => { setPageError(""); setPageError(await attempt(() => downloadQuotationWord(q, store.company))); };
+
   const boxesOf = (q) => (q.items || []).reduce((s, i) => s + toNumber(i.boxQty), 0);
   const excelColumns = [
     { label: "Document", value: (q) => q.docNo, width: 22 },
@@ -1420,8 +1403,11 @@ function QuotationsPage() {
                     </span>
                   ) : (
                     <span className="flex items-center justify-end gap-4">
-                      <button onClick={() => setPrinting(q)} className="flex items-center gap-1 text-xs text-[var(--accent)]">
+                      <button onClick={() => setPrinting(q)} aria-label={`Download ${q.docNo} as PDF`} className="flex items-center gap-1 text-xs text-[var(--accent)]">
                         <Download className="h-3 w-3" /> PDF
+                      </button>
+                      <button onClick={() => downloadWord(q)} aria-label={`Download ${q.docNo} as Word`} className="flex items-center gap-1 text-xs text-[var(--accent)]">
+                        <Download className="h-3 w-3" /> Word
                       </button>
                       <button onClick={() => { setOpen(false); setEditingId(q.id); }} className="text-xs text-[var(--accent)]">Edit</button>
                       <button onClick={() => setConfirmId(q.id)} className="text-xs text-[var(--muted)] hover:text-[var(--status-danger)]">Delete</button>

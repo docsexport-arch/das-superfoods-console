@@ -1,7 +1,7 @@
 // What a document says, as plain rows — shared by the printed page and the
 // Excel download so the two can never disagree. No arithmetic beyond a line's
 // own amount: the totals are the ones the database computed and stored.
-import { fmtDate, toNumber, unitsFromBoxes, amountInWords, conditionsFromText } from "./format.js";
+import { fmtDate, fmtNum, toNumber, unitsFromBoxes, amountInWords, conditionsFromText } from "./format.js";
 
 // An international proforma is priced by rate; a private-label one by MRP.
 export const proformaLineAmount = (pi, line) =>
@@ -67,4 +67,47 @@ export function proformaSheetRows(pi, company = {}) {
     ["Swift Code", company.swift || ""],
   );
   return rows;
+}
+
+// What a quotation says, piece by piece — the printed page (PDF) and the Word
+// download are both drawn from this, so they carry the same words and the same
+// figures. The totals are the stored ones; only a line's own amount is worked out.
+export function quotationModel(q, company = {}) {
+  const isDomestic = String(q.country || "").trim().toLowerCase() === "india";
+  const companyName = company.name || "Das Superfoods";
+  const totals = [{ label: "Total", value: fmtNum(q.totalValue), strong: true }];
+  if (isDomestic && Number(q.igstAmt) > 0) {
+    totals.push({ label: `IGST @ ${fmtNum(q.igstRate, 2)}%`, value: fmtNum(q.igstAmt), strong: false });
+  }
+  totals.push({ label: "Grand total", value: fmtNum(q.grandTotal), strong: true });
+  return {
+    companyName,
+    companyAddress: company.address || "",
+    companyIds: [company.gstNo ? `GST ${company.gstNo}` : "", company.iecCode ? `IEC ${company.iecCode}` : ""].filter(Boolean).join(" · "),
+    title: "Quotation",
+    docNo: q.docNo || "",
+    date: `Date: ${fmtDate(q.date)}`,
+    toLabel: "Quotation to",
+    buyerName: q.buyerName || "",
+    buyerAddress: q.buyerAddress || "",
+    country: q.country || "",
+    termsLabel: "Terms",
+    terms: [`Shipment: ${q.shipmentTerm || "—"}`, `Payment: ${q.paymentTerm || "—"}`],
+    // width in px on the printed page; the column without one takes the rest
+    columns: [
+      { label: "#", width: 28 }, { label: "Product" }, { label: "HSN", width: 90 },
+      { label: "Boxes", width: 70, num: true }, { label: "Rate / box", width: 90, num: true }, { label: "Amount", width: 100, num: true },
+    ],
+    lines: (q.items || []).map((it, i) => [
+      String(i + 1), String(it.product ?? ""), String(it.hsn ?? ""), String(it.boxQty ?? ""),
+      fmtNum(it.boxRate), fmtNum(Number(it.boxQty) * Number(it.boxRate)),
+    ]),
+    totals,
+    words: `Amount in words: ${amountInWords(q.grandTotal)}`,
+    note: `This quotation is valid for 30 days from the date above. Prices are quoted on ${q.shipmentTerm || "the agreed"} terms and `
+      + "are subject to confirmation of availability at the time of order."
+      + (isDomestic ? "" : " IGST is not applicable on export supplies."),
+    signFor: companyName,
+    signatory: "Authorised signatory",
+  };
 }
