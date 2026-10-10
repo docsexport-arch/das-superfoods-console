@@ -96,7 +96,7 @@ export function buildQuotationDocx(docx, m) {
         ...(m.companyIds ? [para(run(m.companyIds, { muted: true }), { before: px(2) })] : []),
       ],
       [
-        para(run(m.title, { bold: true, size: TITLE, caps: true, tracking: 36 }), { right: true }),
+        para(run(m.title, { size: TITLE, caps: true, tracking: 36 }), { right: true }),   // not bold: the printed heading is not
         para(run(m.docNoLine, { bold: true }), { right: true, before: px(6) }),
         para(run(m.date, { muted: true }), { right: true }),
       ],

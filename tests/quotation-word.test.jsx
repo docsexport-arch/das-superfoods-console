@@ -66,6 +66,14 @@ describe("what a quotation says", () => {
     expect(m.totals.map((t) => t.label)).toEqual(["Total", "IGST @ 5.00%", "Grand total"]);
   });
 
+  it("it is headed Sales Quotation, on the PDF and in Word (decisions/031)", async () => {
+    expect(quotationModel(exportQ, company).title).toBe("Sales Quotation");
+    expect(renderToString(<QuotationDocument q={exportQ} company={company} />)).toContain("<h1>Sales Quotation</h1>");
+    expect((await opened(exportQ)).paragraphs).toContain("Sales Quotation");
+    // only the heading changed: the number and the buyer block keep their labels
+    expect(quotationModel(exportQ, company).toLabel).toBe("Quotation to");
+  });
+
   it("the number is labelled: Quotation No.", () => {
     expect(quotationModel(exportQ, company).docNoLine).toBe("Quotation No.: Q/26-27/001");
   });

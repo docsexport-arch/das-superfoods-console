@@ -101,7 +101,7 @@ export function quotationModel(q, company = {}) {
     companyName,
     companyAddress: company.address || "",
     companyIds: [company.gstNo ? `GST ${company.gstNo}` : "", company.iecCode ? `IEC ${company.iecCode}` : ""].filter(Boolean).join(" · "),
-    title: "Quotation",
+    title: "Sales Quotation",
     docNo: q.docNo || "",
     docNoLine: `Quotation No.: ${q.docNo || ""}`,
     date: `Date: ${fmtDate(q.date)}`,
