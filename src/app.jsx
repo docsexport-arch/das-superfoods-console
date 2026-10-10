@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { BOOT_TIMEOUT_MS } from "./config.js";
 import { sb, call, fetchStore, adminApi, emptyStore, accessOf, userFromRow, partyNames, withTimeout, humanise } from "./lib/db.js";
-import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, WEIGHT_UNITS, weightUnitOf, kgFromWeight, weightFromKg, conditionsFromText, conditionsToText, shelfLifeText, SHELF_LIFE_UNITS, gramsFromWeight, weightFromGrams, packWeightText, packLabel } from "./lib/format.js";
+import { todayIST, fmtDate, fmtWhen, fmtNum, fmtMoney, amountInWords, tempId, toNumber, unitsFromBoxes, WEIGHT_UNITS, weightUnitOf, kgFromWeight, weightFromKg, conditionsFromText, conditionsToText, shelfLifeText, SHELF_LIFE_UNITS, gramsFromWeight, weightFromGrams, packWeightText, packLabel, QUOTE_CURRENCIES, quoteCurrencyOf, docMoney, docAmountInWords } from "./lib/format.js";
 import { quotationTotals, proformaTotals, shipmentTotals } from "./lib/money.js";
 import { computeMigrationDrift, describeDrift } from "./lib/migrations.js";
 import { useRoute } from "./lib/route.js";
@@ -1136,7 +1136,9 @@ function QuotationDocument({ q, company }) {
         <thead>
           <tr>
             {m.columns.map((c) => (
-              <th key={c.label} className={c.num ? "num" : undefined} style={c.width ? { width: c.width } : undefined}>{c.label}</th>
+              <th key={c.label} className={c.num ? "num" : undefined} style={c.width ? { width: c.width } : undefined}>
+                {(c.lines || [c.label]).map((line, i) => <React.Fragment key={line}>{i > 0 && <br />}{line}</React.Fragment>)}
+              </th>
             ))}
           </tr>
         </thead>
@@ -1176,6 +1178,9 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
   const [country, setCountry] = useState(initial ? initial.country : "");
   const [shipmentTerm, setShipmentTerm] = useState(initial ? initial.shipmentTerm || "FOB" : "FOB");
   const [paymentTerm, setPaymentTerm] = useState(initial ? initial.paymentTerm || "" : "");
+  // The currency the prices are in (db/023). Until it is picked by hand it
+  // follows the party chosen, else the country: rupees for India, dollars otherwise.
+  const [currencyPick, setCurrencyPick] = useState(initial ? quoteCurrencyOf(initial.currency) : "");
   const [igst, setIgst] = useState(initial ? Boolean(initial.igst) : false);
   const [igstRate, setIgstRate] = useState(initial ? initial.igstRate : 0);
   const [items, setItems] = useState(initial && initial.items && initial.items.length
@@ -1187,6 +1192,8 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
   const totals = quotationTotals({ items, country, igst, igstRate });
   const isDomestic = totals.domestic;
   const total = totals.total, igstAmt = totals.tax, grand = totals.grand;
+  const pickedParty = store.parties.find((x) => x.id === partyId);
+  const currency = currencyPick || (pickedParty && quoteCurrencyOf(pickedParty.currency)) || (isDomestic ? "INR" : "USD");
   const updateItem = (id, k, v) => setItems(items.map((i) => (i.id === id ? { ...i, [k]: v } : i)));
   // Every name on the chosen party — buyer, other names, consignee. The picker
   // only shows when there is more than one.
@@ -1198,7 +1205,7 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
     if (!buyerName.trim()) return setError("Buyer name is required.");
     setBusy(true); setError("");
     const payload = {
-      partyId, buyerName, buyerAddress, country, shipmentTerm, paymentTerm,
+      partyId, buyerName, buyerAddress, country, shipmentTerm, paymentTerm, currency,
       items, igst, igstRate, totalValue: total, igstAmt, grandTotal: grand,
     };
     const message = await onSubmit(payload);
@@ -1240,6 +1247,11 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
         </Field>
         <Field label="Buyer address" className="md:col-span-2"><input className={input} value={buyerAddress} onChange={(e) => setBuyerAddress(e.target.value)} /></Field>
         <Field label="Payment term" className="md:col-span-2"><input className={input} value={paymentTerm} onChange={(e) => setPaymentTerm(e.target.value)} /></Field>
+        <Field label="Currency" hint="Printed on the quotation against every price">
+          <select className={input} value={currency} onChange={(e) => setCurrencyPick(e.target.value)}>
+            {QUOTE_CURRENCIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </Field>
         {isDomestic && (
           <React.Fragment>
             <Field label="IGST applicable" hint="Never applies to international buyers">
@@ -1254,7 +1266,7 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
 
       <div className={panel + " mb-4 overflow-hidden"}>
         <table className="w-full">
-          <thead><tr><th className={th}>Product</th><th className={th}>HSN</th><th className={th}>Box qty</th><th className={th}>Box rate</th><th className={th}>Value</th><th></th></tr></thead>
+          <thead><tr><th className={th}>Product</th><th className={th}>HSN</th><th className={th}>Box qty</th><th className={th}>Box rate ({currency})</th><th className={th}>Value</th><th></th></tr></thead>
           <tbody>
             {items.map((it) => (
               <tr key={it.id} className="border-t border-[var(--line)]">
@@ -1262,7 +1274,7 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
                 <td className="px-2 py-1.5"><input className={input} value={it.hsn} onChange={(e) => updateItem(it.id, "hsn", e.target.value)} /></td>
                 <td className="px-2 py-1.5"><input type="number" className={input} value={it.boxQty} onChange={(e) => updateItem(it.id, "boxQty", e.target.value)} /></td>
                 <td className="px-2 py-1.5"><input type="number" step="0.01" className={input} value={it.boxRate} onChange={(e) => updateItem(it.id, "boxRate", e.target.value)} /></td>
-                <td className={td + " text-[var(--muted)]"}>{fmtNum(Number(it.boxQty) * Number(it.boxRate))}</td>
+                <td className={td + " text-[var(--muted)]"}>{docMoney(Number(it.boxQty) * Number(it.boxRate), currency)}</td>
                 <td className="px-2">
                   {items.length > 1 && (
                     <button onClick={() => setItems(items.filter((x) => x.id !== it.id))}>
@@ -1282,10 +1294,10 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
 
       <div className="flex items-end justify-between">
         <div className="text-sm text-[var(--muted)]">
-          <p>Total <span className="text-[var(--text)]">{fmtNum(total)}</span>
-            {igstAmt > 0 && <span> · IGST <span className="text-[var(--text)]">{fmtNum(igstAmt)}</span></span>}
-            {" "}· Grand total <span className="text-[var(--text)]">{fmtNum(grand)}</span></p>
-          <p className="mt-1 text-xs italic">{amountInWords(grand)}</p>
+          <p>Total <span className="text-[var(--text)]">{docMoney(total, currency)}</span>
+            {igstAmt > 0 && <span> · IGST <span className="text-[var(--text)]">{docMoney(igstAmt, currency)}</span></span>}
+            {" "}· Grand total <span className="text-[var(--text)]">{docMoney(grand, currency)}</span></p>
+          <p className="mt-1 text-xs italic">{docAmountInWords(grand, currency)}</p>
         </div>
         <div className="flex items-center gap-3">
           {error && <span className={errText}>{error}</span>}
@@ -1350,6 +1362,7 @@ function QuotationsPage() {
     { label: "Shipment term", value: (q) => q.shipmentTerm },
     { label: "Payment term", value: (q) => q.paymentTerm, width: 30 },
     { label: "Boxes", value: boxesOf, width: 10 },
+    { label: "Currency", value: (q) => q.currency, width: 10 },
     { label: "Total", value: (q) => q.totalValue },
     { label: "IGST", value: (q) => q.igstAmt },
     { label: "Grand total", value: (q) => q.grandTotal },
@@ -1393,7 +1406,7 @@ function QuotationsPage() {
                 <td className={td}>{q.country}</td>
                 <td className={td + " text-[var(--muted)]"}>{q.shipmentTerm}</td>
                 <td className={tdNum}>{boxesOf(q)}</td>
-                <td className={tdNum}>{fmtNum(q.grandTotal)}</td>
+                <td className={tdNum}>{docMoney(q.grandTotal, q.currency)}</td>
                 <td className={td + " text-right"}>
                   {confirmId === q.id ? (
                     <span className="flex items-center justify-end gap-3">

@@ -71,14 +71,15 @@ export function buildQuotationDocx(docx, m) {
     columnSpan: o.span, borders: all(line),
     margins: { top: px(6), bottom: px(6), left: px(8), right: px(8) },
     shading: o.head ? { type: ShadingType.CLEAR, fill: FILL, color: "auto" } : undefined,
-    children: [para(run(text, o.head ? { bold: true, size: SMALL, caps: true, tracking: 10 } : { bold: o.bold }), { right: o.right })],
+    // A heading can run over several lines ("Price (USD)" / "(Case/Box)" / "FOB"): a paragraph each.
+    children: [].concat(text).map((t) => para(run(t, o.head ? { bold: true, size: SMALL, caps: true, tracking: 10 } : { bold: o.bold }), { right: o.right })),
   });
   const last = m.columns.length - 1;
   const priceTable = new Table({
     width: { size: CONTENT, type: WidthType.DXA }, columnWidths: widths, layout: TableLayoutType.FIXED,
     borders: { ...all(line), insideHorizontal: line, insideVertical: line },
     rows: [
-      new TableRow({ tableHeader: true, cantSplit: true, children: m.columns.map((c, i) => cell(c.label, i, { head: true, right: c.num })) }),
+      new TableRow({ tableHeader: true, cantSplit: true, children: m.columns.map((c, i) => cell(c.lines || c.label, i, { head: true, right: c.num })) }),
       ...m.lines.map((cells) => new TableRow({ cantSplit: true, children: cells.map((text, i) => cell(text, i, { right: m.columns[i].num })) })),
       ...m.totals.map((t) => new TableRow({
         cantSplit: true,

@@ -181,3 +181,38 @@ export function shelfLifeText(value, unit) {
 // A short random id for rows that only exist on screen. The database never
 // sees these as identities — a non-uuid id is how it recognises a new row.
 export const tempId = () => Math.random().toString(36).slice(2, 10);
+
+// A quotation says which currency its prices are in (db/023, decisions/028).
+// Each figure then carries the currency in front, and the amount in words is
+// written the formal way:
+//   "US$ 49,999.50"   "U.S. DOLLARS Forty-Nine Thousand Nine Hundred Ninety-Nine And Fifty Cents Only."
+//   "₹ 1,23,456.00"   "INDIAN RUPEES One Lakh Twenty-Three Thousand Four Hundred Fifty-Six Only."
+// Nothing is converted — the currency names what the typed figures are in. A
+// quotation with no currency (made before db/023) keeps its bare figures.
+export const QUOTE_CURRENCIES = [{ key: "USD", label: "USD — US Dollar (US$)" }, { key: "INR", label: "INR — Indian Rupee (₹)" }];
+const DOC_CURRENCY = {
+  USD: { mark: "US$", name: "U.S. DOLLARS", minor: "Cents", locale: "en-US", words: wordsInternational },
+  INR: { mark: "₹", name: "INDIAN RUPEES", minor: "Paise", locale: "en-IN", words: wordsIndian },
+};
+export const quoteCurrencyOf = (currency) => (Object.prototype.hasOwnProperty.call(DOC_CURRENCY, currency) ? currency : "");
+
+export function docMoney(value, currency) {
+  const c = DOC_CURRENCY[quoteCurrencyOf(currency)];
+  if (!c) return fmtNum(value);
+  const n = Math.round(toNumber(value) * 100) / 100;
+  return `${c.mark} ${n.toLocaleString(c.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// "forty nine thousand" → "Forty-Nine Thousand"
+const titled = (words) => words
+  .replace(/\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety) (one|two|three|four|five|six|seven|eight|nine)\b/g, "$1-$2")
+  .replace(/\b[a-z]/g, (ch) => ch.toUpperCase());
+
+export function docAmountInWords(value, currency) {
+  const c = DOC_CURRENCY[quoteCurrencyOf(currency)];
+  if (!c) return amountInWords(value);
+  const cents = Math.round(Math.abs(toNumber(value)) * 100);
+  const whole = Math.floor(cents / 100);
+  const frac = cents % 100;
+  return `${c.name} ${titled(c.words(whole))}${frac ? ` And ${titled(below1000(frac))} ${c.minor}` : ""} Only.`;
+}

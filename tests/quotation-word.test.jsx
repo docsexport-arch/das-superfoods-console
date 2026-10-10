@@ -37,7 +37,7 @@ const indiaQ = { ...exportQ, id: "q2", docNo: "Q/26-27/002", country: "India", i
 const said = (m) => [
   m.companyName, m.companyAddress, m.companyIds, m.title, m.docNo, m.date,
   m.toLabel, m.buyerName, m.buyerAddress, m.country, m.termsLabel, ...m.terms,
-  ...m.columns.map((c) => c.label), ...m.lines.flat(), ...m.totals.flatMap((t) => [t.label, t.value]),
+  ...m.columns.flatMap((c) => c.lines || [c.label]), ...m.lines.flat(), ...m.totals.flatMap((t) => [t.label, t.value]),
   m.words, m.note, m.signFor, m.signatory,
 ].filter((s) => String(s).trim() !== "");
 
