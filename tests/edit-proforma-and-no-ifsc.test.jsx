@@ -67,7 +67,7 @@ describe("editing a proforma — on screen", () => {
   it("the form opens with everything the proforma says, and saves rather than creates", () => {
     const html = editForm(open);
     expect(html).toContain("Edit international proforma");
-    expect(html).toContain("Editing PI/25-26/014, raised 05/10/2026");
+    expect(html).toContain("Editing PI/25-26/014, dated 05/10/2026");
     for (const v of ["PI/25-26/014", "PO-77", "2026-10-01", "3200"]) expect(html, v).toMatch(new RegExp(`value="${v}"`));
     expect(html).toContain("Save changes");
     expect(html).not.toContain("Create proforma");
@@ -147,8 +147,8 @@ describe("editing a proforma — what is sent, and what the database does with i
     const defined = readdirSync(join(ROOT, "db")).filter((f) => f.endsWith(".sql"))
       .filter((f) => /^create or replace function public\.save_proforma\(/m.test(readFileSync(join(ROOT, "db", f), "utf8")));
     // db/022 redefines it with one change (a deleted proforma's number is free); still one copy of the arithmetic.
-    expect(defined).toEqual(["014_edit_proforma_and_no_ifsc.sql", "022_delete_proforma.sql"]);
-    const sql022 = readFileSync(join(ROOT, "db", "022_delete_proforma.sql"), "utf8").replace(/\r\n/g, "\n");
+    expect(defined).toEqual(["014_edit_proforma_and_no_ifsc.sql", "022_delete_proforma.sql", "027_proforma_date.sql"]);
+    const sql022 = readFileSync(join(ROOT, "db", "027_proforma_date.sql"), "utf8").replace(/\r\n/g, "\n");
     const latest = new RegExp("create or replace function public\\.save_proforma\\([\\s\\S]*?\\n\\$\\$;").exec(sql022)[0];
     expect(latest.match(/into v_boxes, v_total, v_taxable/g)).toHaveLength(1);
     expect(latest.match(/round\(v_taxable \* v_rate \/ 100, 2\)/g)).toHaveLength(1);

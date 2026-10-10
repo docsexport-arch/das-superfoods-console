@@ -26,7 +26,7 @@ export const PROFORMA_KEYS = [
   "id", "expectedUpdatedAt", "docNo", "type", "partyId", "quotationRef", "buyerName", "buyerAddress", "consigneeName",
   "consigneeAddress", "consigneeOptions", "portOfLoading", "destinationPort",
   "shipmentTerm", "paymentTerm", "conditions", "currency", "buyerOrderNo",
-  "buyerOrderDate", "additionalDetails", "taxRate", "items",
+  "buyerOrderDate", "additionalDetails", "taxRate", "items", "docDate",
 ];
 export const SHIPMENT_KEYS = [
   "id", "expectedUpdatedAt", "piId", "items", "freight", "otherAdj", "otherReason", "gstPercent", "roundOff",

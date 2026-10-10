@@ -1611,7 +1611,14 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
   // Continuing a draft whose party is no longer on file drops its product
   // lines: they cannot be trusted against a different party.
   const saved = editing ? {
-    docNo: editing.docNo, partyId: editing.partyId, quotationRef: editing.quotationRef,
+    docNo: editing.docNo, docDate: editing.date, partyId: editing.partyId, quotationRef: editing.quotationRef,
+    // A proforma typed by hand has no party: its own details are what the form opens with.
+    manual: editing.partyId ? null : {
+      buyerName: editing.buyerName || "", buyerAddress: editing.buyerAddress || "",
+      consigneeName: editing.consigneeName || "", consigneeAddress: editing.consigneeAddress || "",
+      shipmentTerm: editing.shipmentTerm || "", paymentTerm: editing.paymentTerm || "",
+      currency: editing.currency, conditions: conditionsFromText(editing.conditions),
+    },
     orderNo: editing.buyerOrderNo, orderDate: editing.buyerOrderDate, items: editing.items,
     portOfLoading: editing.portOfLoading || "", destinationPort: editing.destinationPort || "",
     extra: editing.additionalDetails, taxRate: editing.taxRate,
@@ -1641,10 +1648,34 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
   // may have been edited since the draft was saved or the proforma raised.
   const savedAt = (who) => (savedParty && who
     ? namesFor(savedParty).findIndex((c) => c.name === tidy(who.name) && c.address === tidy(who.address)) : -1);
-  const [partyId, setPartyId] = useState(savedParty ? savedParty.id : eligible.length ? eligible[0].id : "");
-  const party = store.parties.find((p) => p.id === partyId);
+  // "Manual entry" in the Party list (decisions/035): the buyer, the consignee,
+  // the terms and the product lines are typed here instead of read from a
+  // party. The party id is then empty, and the typed details are read through
+  // the same shape a party has, so the rest of the form does not care which it is.
+  const MANUAL = "";
+  const blankManual = {
+    buyerName: "", buyerAddress: "", consigneeName: "", consigneeAddress: "",
+    shipmentTerm: "", paymentTerm: "", currency: type === "international" ? "USD" : "INR", conditions: [""],
+  };
+  const savedManual = saved.manual && typeof saved.manual === "object" ? {
+    ...blankManual, ...saved.manual,
+    currency: saved.manual.currency === "INR" || saved.manual.currency === "USD" ? saved.manual.currency : blankManual.currency,
+    conditions: Array.isArray(saved.manual.conditions) && saved.manual.conditions.length ? saved.manual.conditions : [""],
+  } : null;
+  const [partyId, setPartyId] = useState(savedParty ? savedParty.id : savedManual || !eligible.length ? MANUAL : eligible[0].id);
+  const [manual, setManual] = useState(savedManual || blankManual);
+  const setM = (k, v) => setManual({ ...manual, [k]: v });
+  const isManual = partyId === MANUAL;
+  const party = isManual ? {
+    id: MANUAL, buyerName: tidy(manual.buyerName), buyerAddress: tidy(manual.buyerAddress),
+    consigneeName: tidy(manual.consigneeName), consigneeAddress: tidy(manual.consigneeAddress),
+    shipmentTerm: tidy(manual.shipmentTerm), paymentTerm: tidy(manual.paymentTerm), currency: manual.currency,
+    conditions: conditionsToText(manual.conditions), products: [], consigneeOptions: [], altBuyers: [],
+  } : store.parties.find((p) => p.id === partyId);
   // Typed by hand (db/013) — the database refuses a blank or repeated number.
   const [docNo, setDocNo] = useState(saved.docNo || "");
+  // The date can be typed too (db/027): today on a new proforma, the proforma's own when editing.
+  const [docDate, setDocDate] = useState(saved.docDate || todayIST());
   // Ports belong to the proforma, not the party (decisions/014), so they are
   // typed here. A party saved before that change may still hold a pair: it is
   // offered as the starting value, in plain sight — never used unseen.
@@ -1654,7 +1685,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
   const [quotationRef, setQuotationRef] = useState(saved.quotationRef || "");
   const [orderNo, setOrderNo] = useState(saved.orderNo || "");
   const [orderDate, setOrderDate] = useState(saved.orderDate || todayIST());
-  const [items, setItems] = useState(savedParty && Array.isArray(saved.items) ? saved.items : []);
+  const [items, setItems] = useState((savedParty || savedManual) && Array.isArray(saved.items) ? saved.items : []);
   const [extra, setExtra] = useState(saved.extra || "");
   const [taxRate, setTaxRate] = useState(saved.taxRate ?? 5);
   // Which of the party's names is the buyer on this proforma (0 is the main
@@ -1667,15 +1698,16 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
   const isIntl = type === "international";
   const choices = namesFor(party);
   const nobody = { name: "", address: "" };
-  const buyer = choices[buyerIdx] || choices[0] || nobody;
   const ownConsignee = choices.findIndex((c) => c.isConsignee);
   const consigneeAt = consigneeIdx === null ? ownConsignee : consigneeIdx;
-  const consignee = choices[consigneeAt] || nobody;
+  // Typed by hand, the buyer and the consignee are simply what was typed.
+  const buyer = isManual ? { name: party.buyerName, address: party.buyerAddress } : choices[buyerIdx] || choices[0] || nobody;
+  const consignee = isManual ? { name: party.consigneeName, address: party.consigneeAddress } : choices[consigneeAt] || nobody;
   const consigneeLabel = isIntl ? "Consignee" : "Ship to";
 
   // Ports, terms and currency are read from the party when the form is saved.
   // Without the party the proforma was raised for there is nothing safe to read.
-  if (editing && !savedParty) {
+  if (editing && !savedParty && !savedManual) {
     return (
       <div className={card + " mb-6 p-6"}>
         <p className="text-sm text-[var(--muted)]">
@@ -1709,6 +1741,16 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
     }]);
   };
 
+  // Typed by hand, a line carries what a party product would have brought with
+  // it: units per box for the unit count, weights per box for the packing list.
+  const addManualLine = () => setItems([...items, { id: tempId(), name: "", hsn: "", boxQty: 0, rate: 0, mrp: 0, packsPerBox: 0, netWt: 0, grossWt: 0 }]);
+  const setLine = (id, k, v) => setItems(items.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
+  // What is saved: a row left wholly empty is not a line, and the figures typed are stored as numbers.
+  const linesToSave = () => (!isManual ? items : items
+    .filter((l) => tidy(l.name) !== "" || toNumber(l.boxQty) !== 0 || toNumber(l.rate) !== 0 || toNumber(l.mrp) !== 0)
+    .map((l) => ({ ...l, name: tidy(l.name), hsn: tidy(l.hsn), rate: toNumber(l.rate), mrp: toNumber(l.mrp),
+      packsPerBox: toNumber(l.packsPerBox), netWt: toNumber(l.netWt), grossWt: toNumber(l.grossWt) })));
+
   const totals = proformaTotals({ items, type, taxRate });
   const totalBoxes = totals.boxes, totalUnits = totals.units, totalValue = totals.total;
   const taxableValue = totals.taxable, taxAmount = totals.tax, grandTotal = totals.grand;
@@ -1720,7 +1762,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
           <p className="font-display text-lg">
             {editing ? "Edit" : draft ? "Draft" : "New"} {isIntl ? "international" : "private-label / merchant-export"} proforma
           </p>
-          {editing && <p className="mt-1 text-xs text-[var(--muted)]">Editing {editing.docNo}, raised {fmtDate(editing.date)}. The date it was raised does not change, and the change is recorded in the audit log.</p>}
+          {editing && <p className="mt-1 text-xs text-[var(--muted)]">Editing {editing.docNo}, dated {fmtDate(editing.date)}. The change is recorded in the audit log.</p>}
           {draft && <p className="mt-1 text-xs text-[var(--muted)]">Continuing the draft saved by {draft.savedBy || "—"} · {fmtWhen(draft.updatedAt)}</p>}
           {partyGone && <p className="mt-1 text-xs text-[var(--status-warn)]">The party this draft was for is no longer on file, so its product lines were cleared. Pick a party to continue.</p>}
         </div>
@@ -1732,16 +1774,18 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
           <input className={input} value={docNo} maxLength={40} placeholder="e.g. DS-PI-INTL-2026-0002"
             onChange={(e) => setDocNo(e.target.value)} />
         </Field>
-        <Field label="Party">
+        <Field label="Date"><input type="date" className={input} value={docDate} onChange={(e) => setDocDate(e.target.value)} /></Field>
+        <Field label="Party" hint={isManual ? "Type the buyer, terms and products below" : undefined}>
           <select className={input} value={partyId} onChange={(e) => {
             const next = store.parties.find((p) => p.id === e.target.value);
             setPartyId(e.target.value); setItems([]); setBuyerIdx(0); setConsigneeIdx(null);
             setPortOfLoading(portsOf(next).loading); setDestinationPort(portsOf(next).destination);
           }}>
             {eligible.map((p) => <option key={p.id} value={p.id}>{p.buyerName}</option>)}
+            <option value={MANUAL}>Manual entry — type the details</option>
           </select>
         </Field>
-        {choices.length > 1 && (
+        {!isManual && choices.length > 1 && (
           <React.Fragment>
             <Field label="Buyer on this proforma" hint="Any name on this party can be the buyer">
               <select className={input} value={buyerIdx} onChange={(e) => setBuyerIdx(Number(e.target.value))}>
@@ -1773,6 +1817,44 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
         )}
       </div>
 
+      {isManual && (
+        <div className={panel + " mb-5 p-4"}>
+          <p className="mb-1 text-sm font-medium">Buyer and terms, typed by hand</p>
+          <p className="mb-3 text-xs text-[var(--muted)]">Used on this proforma only. Nothing is added to Parties.</p>
+          <div className="mb-4 grid gap-4 md:grid-cols-3">
+            <Field label="Buyer name"><input className={input} value={manual.buyerName} onChange={(e) => setM("buyerName", e.target.value)} /></Field>
+            <Field label="Buyer address" className="md:col-span-2"><input className={input} value={manual.buyerAddress} onChange={(e) => setM("buyerAddress", e.target.value)} /></Field>
+            <Field label={consigneeLabel}><input className={input} value={manual.consigneeName} onChange={(e) => setM("consigneeName", e.target.value)} /></Field>
+            <Field label={isIntl ? "Consignee address" : "Shipping address"} className="md:col-span-2"><input className={input} value={manual.consigneeAddress} onChange={(e) => setM("consigneeAddress", e.target.value)} /></Field>
+            <Field label="Shipment term"><input className={input} placeholder="FOB / CIF / CNF" value={manual.shipmentTerm} onChange={(e) => setM("shipmentTerm", e.target.value)} /></Field>
+            <Field label="Payment term"><input className={input} value={manual.paymentTerm} onChange={(e) => setM("paymentTerm", e.target.value)} /></Field>
+            <Field label="Currency">
+              <select className={input} value={manual.currency} onChange={(e) => setM("currency", e.target.value)}>
+                <option value="USD">USD</option><option value="INR">INR</option>
+              </select>
+            </Field>
+          </div>
+          <p className="mb-1 text-sm font-medium">Conditions</p>
+          <p className="mb-3 text-xs text-[var(--muted)]">Printed on this proforma, each on its own line. Leave empty for none.</p>
+          {manual.conditions.map((c, i) => (
+            <div key={i} className="mb-2 grid items-end gap-3 md:grid-cols-[1fr_auto]">
+              <Field label={`Condition ${i + 1}`}>
+                <input className={input} value={c} onChange={(e) => setM("conditions", manual.conditions.map((x, j) => (j === i ? e.target.value : x)))} />
+              </Field>
+              {manual.conditions.length > 1 && (
+                <button type="button" className="mb-2.5" aria-label={`Remove condition ${i + 1}`} onClick={() => setM("conditions", manual.conditions.filter((_, j) => j !== i))}>
+                  <Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" />
+                </button>
+              )}
+            </div>
+          ))}
+          <button type="button" className={btnGhost + " flex items-center gap-1.5"} onClick={() => setM("conditions", [...manual.conditions, ""])}>
+            <Plus className="h-4 w-4" /> Add another condition
+          </button>
+        </div>
+      )}
+
+      {!isManual && (
       <div className={panel + " mb-5 grid gap-4 p-4 text-xs md:grid-cols-3"}>
         <div>
           <p className="mb-1 uppercase tracking-wider text-[var(--faint)]">Buyer</p>
@@ -1793,18 +1875,34 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
           </div>
         )}
       </div>
+      )}
 
       <div className={panel + " mb-4 overflow-hidden"}>
         <table className="w-full">
           <thead>
             <tr>
               <th className={th}>Product</th><th className={th}>HSN</th>
+              {isManual && <React.Fragment><th className={th}>Units / box</th><th className={th}>Net kg / box</th><th className={th}>Gross kg / box</th></React.Fragment>}
               <th className={th}>{isIntl ? "Rate / box" : "MRP / box"}</th>
               <th className={th}>Box qty</th><th className={th}>{isIntl ? "Amount" : "Taxable value"}</th><th></th>
             </tr>
           </thead>
           <tbody>
-            {items.map((it) => (
+            {/* Typed by hand: every cell of a line is a box. */}
+            {isManual && items.map((it, i) => (
+              <tr key={it.id} className="border-t border-[var(--line)]">
+                <td className="px-2 py-1.5"><input className={input} aria-label={`Product ${i + 1}`} value={it.name} onChange={(e) => setLine(it.id, "name", e.target.value)} /></td>
+                <td className="px-2 py-1.5 w-28"><input className={input} aria-label={`HSN ${i + 1}`} value={it.hsn} onChange={(e) => setLine(it.id, "hsn", e.target.value)} /></td>
+                <td className="px-2 py-1.5 w-24"><input type="number" className={input} aria-label={`Units per box ${i + 1}`} value={it.packsPerBox} onChange={(e) => setLine(it.id, "packsPerBox", e.target.value)} /></td>
+                <td className="px-2 py-1.5 w-24"><input type="number" step="0.001" className={input} aria-label={`Net kg per box ${i + 1}`} value={it.netWt} onChange={(e) => setLine(it.id, "netWt", e.target.value)} /></td>
+                <td className="px-2 py-1.5 w-24"><input type="number" step="0.001" className={input} aria-label={`Gross kg per box ${i + 1}`} value={it.grossWt} onChange={(e) => setLine(it.id, "grossWt", e.target.value)} /></td>
+                <td className="px-2 py-1.5 w-28"><input type="number" step="0.01" className={input} aria-label={`${isIntl ? "Rate" : "MRP"} per box ${i + 1}`} value={isIntl ? it.rate : it.mrp} onChange={(e) => setLine(it.id, isIntl ? "rate" : "mrp", e.target.value)} /></td>
+                <td className="px-2 py-1.5 w-24"><input type="number" className={input} aria-label={`Box quantity ${i + 1}`} value={it.boxQty} onChange={(e) => setLine(it.id, "boxQty", e.target.value)} /></td>
+                <td className={td + " text-[var(--muted)]"}>{fmtNum(Number(it.boxQty) * Number(isIntl ? it.rate : it.mrp))}</td>
+                <td className="px-2"><button aria-label={`Remove line ${i + 1}`} onClick={() => setItems(items.filter((x) => x.id !== it.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" /></button></td>
+              </tr>
+            ))}
+            {!isManual && items.map((it) => (
               <tr key={it.id} className="border-t border-[var(--line)]">
                 <td className={td}>
                   {it.name}
@@ -1818,22 +1916,28 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
                 <td className="px-2"><button onClick={() => setItems(items.filter((x) => x.id !== it.id))}><Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" /></button></td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-xs text-[var(--muted)]">No product lines yet.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={isManual ? 9 : 6} className="px-4 py-6 text-center text-xs text-[var(--muted)]">No product lines yet.</td></tr>}
           </tbody>
           {items.length > 0 && (
             <tfoot>
               <tr className="border-t border-[var(--line)] bg-[var(--field)]">
-                <td className={td + " text-xs uppercase tracking-wider text-[var(--muted)]"} colSpan={3}>Subtotal</td>
+                <td className={td + " text-xs uppercase tracking-wider text-[var(--muted)]"} colSpan={isManual ? 6 : 3}>Subtotal</td>
                 <td className={td}>{totalBoxes} boxes · {totalUnits} units</td>
                 <td className={td}>{fmtNum(isIntl ? totalValue : taxableValue)}</td><td></td>
               </tr>
             </tfoot>
           )}
         </table>
-        <select className="w-full border-t border-[var(--line)] bg-transparent py-2.5 text-center text-xs text-[var(--accent)]" value="" onChange={(e) => addLine(e.target.value)}>
-          <option value="">+ Add product from the party master</option>
-          {party.products.map((p) => <option key={p.id} value={p.id}>{p.name}{packLabel(p) ? ` — ${packLabel(p)}` : ""}</option>)}
-        </select>
+        {isManual ? (
+          <button onClick={addManualLine} className="flex w-full items-center justify-center gap-1 border-t border-[var(--line)] py-2.5 text-xs text-[var(--accent)]">
+            <Plus className="h-3.5 w-3.5" /> Add product line
+          </button>
+        ) : (
+          <select className="w-full border-t border-[var(--line)] bg-transparent py-2.5 text-center text-xs text-[var(--accent)]" value="" onChange={(e) => addLine(e.target.value)}>
+            <option value="">+ Add product from the party master</option>
+            {party.products.map((p) => <option key={p.id} value={p.id}>{p.name}{packLabel(p) ? ` — ${packLabel(p)}` : ""}</option>)}
+          </select>
+        )}
       </div>
 
       {!isIntl && <Field label="Additional details" className="mb-5"><textarea rows={2} className={input} value={extra} onChange={(e) => setExtra(e.target.value)} /></Field>}
@@ -1851,8 +1955,10 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
             <button className={btnGhost} onClick={() => onSaveDraft({
               title: [docNo.trim(), buyer.name, orderNo ? "order " + orderNo : "", totalBoxes + " boxes"].filter(Boolean).join(" · "),
               payload: {
-                docNo, type, partyId, quotationRef, orderNo, orderDate, items, extra, taxRate,
+                docNo, docDate, type, partyId, quotationRef, orderNo, orderDate, items, extra, taxRate,
                 portOfLoading, destinationPort,
+                // typed by hand: the details themselves are the draft
+                manual: isManual ? manual : undefined,
                 buyer: { name: buyer.name, address: buyer.address },
                 consignee: consigneeIdx === null || !choices[consigneeIdx] ? null : { name: consignee.name, address: consignee.address },
               },
@@ -1860,7 +1966,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
           )}
           <button className={btn} onClick={() => onSave({
             id: editing ? editing.id : undefined, expectedUpdatedAt: editing ? editing.updatedAt : undefined,
-            docNo: docNo.trim(), type, date: todayIST(), partyId, quotationRef,
+            docNo: docNo.trim(), docDate, type, date: docDate, partyId, quotationRef,
             buyerName: buyer.name, buyerAddress: buyer.address,
             consigneeName: consignee.name, consigneeAddress: consignee.address,
             // Every name on the party travels with the proforma, so the shipment
@@ -1868,7 +1974,7 @@ function ProformaForm({ type, draft, editing, onSave, onSaveDraft, onCancel }) {
             consigneeOptions: Array.from(new Set([...choices.map((c) => c.name), ...(party.consigneeOptions || [])].filter(Boolean))),
             portOfLoading: isIntl ? portOfLoading.trim() : "", destinationPort: isIntl ? destinationPort.trim() : "",
             paymentTerm: party.paymentTerm, shipmentTerm: party.shipmentTerm, conditions: party.conditions,
-            currency: party.currency, buyerOrderNo: orderNo, buyerOrderDate: orderDate, items, additionalDetails: extra,
+            currency: party.currency, buyerOrderNo: orderNo, buyerOrderDate: orderDate, items: linesToSave(), additionalDetails: extra,
             totalBoxes, totalValue, taxableValue, taxRate, taxAmount,
             grandTotal: isIntl ? totalValue : grandTotal, linkedFinalInvoiceId: null,
           })}>{editing ? "Save changes" : "Create proforma"}</button>
