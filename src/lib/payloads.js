@@ -19,7 +19,7 @@ export const PARTY_PRODUCT_KEYS = [
 ];
 export const QUOTATION_KEYS = [
   "id", "partyId", "buyerName", "buyerAddress", "country", "shipmentTerm",
-  "paymentTerm", "igst", "igstRate", "items", "expectedUpdatedAt", "currency",
+  "paymentTerm", "igst", "igstRate", "items", "expectedUpdatedAt", "currency", "terms",
 ];
 export const PROFORMA_KEYS = [
   "id", "expectedUpdatedAt", "docNo", "type", "partyId", "quotationRef", "buyerName", "buyerAddress", "consigneeName",

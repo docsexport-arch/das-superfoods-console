@@ -144,6 +144,8 @@ export const quotationFromRow = (r) => ({
   igst: r.igst, igstRate: num(r.igst_rate),
   // USD or INR; empty on a quotation made before db/023.
   currency: r.currency || "",
+  // Terms typed on the quotation, one per line (db/024).
+  terms: r.terms || "",
   totalValue: num(r.total_value), igstAmt: num(r.igst_amount), grandTotal: num(r.grand_total),
   items: r.items || [],
   updatedAt: r.updated_at,

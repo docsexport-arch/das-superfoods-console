@@ -113,6 +113,9 @@ export function quotationModel(q, company = {}) {
     ]),
     totals,
     words: `Amount in words: ${currency ? docAmountInWords(q.grandTotal, currency) : amountInWords(q.grandTotal)}`,
+    // Terms typed on this quotation (db/024), numbered in the order they were typed. None typed — no heading.
+    conditionsLabel: "Terms & conditions",
+    conditions: conditionsFromText(q.terms).map((term, i) => `${i + 1}. ${term}`),
     note: `This quotation is valid for 30 days from the date above. Prices are quoted on ${q.shipmentTerm || "the agreed"} terms and `
       + "are subject to confirmation of availability at the time of order."
       + (isDomestic ? "" : " IGST is not applicable on export supplies."),

@@ -38,7 +38,7 @@ const said = (m) => [
   m.companyName, m.companyAddress, m.companyIds, m.title, m.docNo, m.date,
   m.toLabel, m.buyerName, m.buyerAddress, m.country, m.termsLabel, ...m.terms,
   ...m.columns.flatMap((c) => c.lines || [c.label]), ...m.lines.flat(), ...m.totals.flatMap((t) => [t.label, t.value]),
-  m.words, m.note, m.signFor, m.signatory,
+  m.words, ...(m.conditions.length ? [m.conditionsLabel, ...m.conditions] : []), m.note, m.signFor, m.signatory,
 ].filter((s) => String(s).trim() !== "");
 
 const unescape = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;|&#39;|&#x27;/g, "'").replace(/&amp;/g, "&");

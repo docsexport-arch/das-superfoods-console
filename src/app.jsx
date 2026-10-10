@@ -1159,6 +1159,13 @@ function QuotationDocument({ q, company }) {
 
       <p style={{ marginTop: 8, fontStyle: "italic" }}>{m.words}</p>
 
+      {m.conditions.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <p className="muted" style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em" }}>{m.conditionsLabel}</p>
+          {m.conditions.map((t, i) => <p key={i} style={{ margin: i === 0 ? "3px 0 0" : "2px 0 0" }}>{t}</p>)}
+        </div>
+      )}
+
       <p className="muted" style={{ marginTop: 18, fontSize: 11 }}>{m.note}</p>
 
       <div style={{ marginTop: 48, textAlign: "right" }}>
@@ -1181,6 +1188,12 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
   // The currency the prices are in (db/023). Until it is picked by hand it
   // follows the party chosen, else the country: rupees for India, dollars otherwise.
   const [currencyPick, setCurrencyPick] = useState(initial ? quoteCurrencyOf(initial.currency) : "");
+  // Terms typed for this quotation (db/024): edited as a list, saved as one
+  // text with a term per line. There is always at least one box to type into.
+  const [terms, setTerms] = useState(() => {
+    const list = conditionsFromText(initial ? initial.terms : "");
+    return list.length ? list : [""];
+  });
   const [igst, setIgst] = useState(initial ? Boolean(initial.igst) : false);
   const [igstRate, setIgstRate] = useState(initial ? initial.igstRate : 0);
   const [items, setItems] = useState(initial && initial.items && initial.items.length
@@ -1206,6 +1219,7 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
     setBusy(true); setError("");
     const payload = {
       partyId, buyerName, buyerAddress, country, shipmentTerm, paymentTerm, currency,
+      terms: conditionsToText(terms),
       items, igst, igstRate, totalValue: total, igstAmt, grandTotal: grand,
     };
     const message = await onSubmit(payload);
@@ -1292,6 +1306,28 @@ function QuotationForm({ initial, onCancel, onSubmit }) {
         </button>
       </div>
 
+      <div className="mb-5">
+        <p className="mb-1 text-sm font-medium">Terms</p>
+        <p className="mb-3 text-xs text-[var(--muted)]">
+          Type any terms this quotation needs, one in each box. They print on the quotation, numbered, under "Terms &amp; conditions". Leave empty for none.
+        </p>
+        {terms.map((t, i) => (
+          <div key={i} className="mb-2 grid items-end gap-3 md:grid-cols-[1fr_auto]">
+            <Field label={`Term ${i + 1}`}>
+              <input className={input} value={t} onChange={(e) => setTerms(terms.map((x, j) => (j === i ? e.target.value : x)))} />
+            </Field>
+            {terms.length > 1 && (
+              <button type="button" className="mb-2.5" aria-label={`Remove term ${i + 1}`} onClick={() => setTerms(terms.filter((_, j) => j !== i))}>
+                <Trash2 className="h-4 w-4 text-[var(--muted)] hover:text-[var(--status-danger)]" />
+              </button>
+            )}
+          </div>
+        ))}
+        <button type="button" className={btnGhost + " flex items-center gap-1.5"} onClick={() => setTerms([...terms, ""])}>
+          <Plus className="h-4 w-4" /> Add another term
+        </button>
+      </div>
+
       <div className="flex items-end justify-between">
         <div className="text-sm text-[var(--muted)]">
           <p>Total <span className="text-[var(--text)]">{docMoney(total, currency)}</span>
@@ -1361,6 +1397,7 @@ function QuotationsPage() {
     { label: "Country", value: (q) => q.country },
     { label: "Shipment term", value: (q) => q.shipmentTerm },
     { label: "Payment term", value: (q) => q.paymentTerm, width: 30 },
+    { label: "Terms", value: (q) => conditionsFromText(q.terms).join("; "), width: 50 },
     { label: "Boxes", value: boxesOf, width: 10 },
     { label: "Currency", value: (q) => q.currency, width: 10 },
     { label: "Total", value: (q) => q.totalValue },

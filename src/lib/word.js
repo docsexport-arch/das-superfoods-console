@@ -117,6 +117,10 @@ export function buildQuotationDocx(docx, m) {
     spacer({ before: px(5), after: px(5) }),
     priceTable,
     para(run(m.words, { italics: true }), { before: px(8) }),
+    ...(m.conditions.length ? [
+      para(run(m.conditionsLabel, { muted: true, size: SMALL, caps: true, tracking: 10 }), { before: px(16), keepNext: true }),
+      ...m.conditions.map((t, i) => para(run(t), { before: i === 0 ? px(3) : px(2) })),
+    ] : []),
     para(run(m.note, { muted: true, size: SMALL }), { before: px(18) }),
     para([run("For "), run(m.signFor, { bold: true })], { right: true, before: px(48), keepNext: true }),
     para(run(m.signatory, { muted: true }), { right: true, before: px(44) }),
