@@ -20,11 +20,12 @@ a green build.
 
 ## Owed by the build
 
-**At promotion**
-- [ ] Apply `db/pending/028_lockdown_direct_writes.sql` once the RPC-only client
-      is live: move it into `db/`, bump `EXPECTED_MIGRATION` to 28 in the same
-      commit. Until then the tables still accept direct writes from a signed-in
-      user who has the grant.
+**At promotion** — promoted 2026-11-21: `lockdown-wave-1` fast-forwarded onto
+`main`; https://das-superfoods-console.vercel.app serves the RPC-only console.
+- [x] Applied `db/028_lockdown_direct_writes.sql` (2026-11-21): the tables are
+      read-only to signed-in users; every write is an RPC. Verified as a signed-in
+      user: direct insert / update / delete and `next_doc_no` refused (42501),
+      `save_party` and `save_quotation` still work.
 - [ ] Then drop the three legacy columns (`access_documents`, `access_parties`,
       `access_company`) and the legacy branch of `_profiles_sync_access` — they
       exist only for the client that is live today (decisions/006).

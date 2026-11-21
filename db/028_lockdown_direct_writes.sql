@@ -1,11 +1,9 @@
--- db/028 — PENDING. Do not run until the RPC-only client is live on production.
+-- db/028 — tables become read-only to signed-in users; every write is an RPC.
 --
--- Why it waits: the client on production today (commit 0aab035) still writes
--- straight into the tables and inserts its own audit rows. This migration
--- removes exactly those paths, so running it early would break the live site.
--- The order is: promote branch lockdown-wave-1 → confirm the live site works →
--- move this file up to db/, bump EXPECTED_MIGRATION to 28 in the same commit,
--- then apply it.
+-- Applied 2026-11-21, after branch lockdown-wave-1 was promoted to main and the
+-- live site was confirmed to be serving the RPC-only console. The client that
+-- was live before (commit 0aab035) wrote straight into the tables; this removes
+-- exactly those paths.
 --
 -- What it does: after this, the ONLY way to change data is a definer RPC that
 -- checks the caller, does the arithmetic, and writes the audit row. The tables
